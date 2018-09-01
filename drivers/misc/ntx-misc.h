@@ -42,18 +42,5 @@ int msp430_get_homeled_gpio_delaylevel(void);
 
 void msp430_homepad_sensitivity_set(unsigned char bVal);
 
-#define MSP430_FL_IDX_ALL		(-1)
-#define MSP430_FL_IDX_W			(0)
-#define MSP430_FL_IDX_R			(1)
-int msp430_fl_set_duty(int iColorIDX,int iDuty);
-int msp430_fl_get_duty(int iColorIDX);
-int msp430_fl_get_duty_max(int iColorIDX);
-int msp430_fl_get_duty_min(int iColorIDX);
-int msp430_fl_set_freq(int iColorIDX,int iFreq);
-int msp430_fl_get_freq(int iColorIDX);
-int msp430_fl_get_freq_max(int iColorIDX);
-int msp430_fl_get_freq_min(int iColorIDX);
-int msp430_fl_enable(int iColorIDX,int iIsEnable);
-int msp430_fl_is_enable(int iColorIDX);
 #endif //] _NTX_MISC_H
 

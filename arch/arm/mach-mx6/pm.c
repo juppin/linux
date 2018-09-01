@@ -89,9 +89,7 @@ extern unsigned int gpc_wake_irq[4];
 extern bool enable_wait_mode;
 extern unsigned long save_ttbr1(void);
 extern void restore_ttbr1(u32 ttbr1);
-extern unsigned long mx6_suspend_end asm("mx6_suspend_end");
-extern unsigned long mx6_suspend_start asm("mx6_suspend_start");
-extern int pu_disable(struct anatop_regulator *sreg);
+
 
 static struct device *pm_dev;
 struct clk *gpc_dvfs_clk;
@@ -117,7 +115,6 @@ static bool usb_vbus_wakeup_enabled;
 
 void *suspend_iram_base;
 unsigned long suspend_iram_phys_addr;
-unsigned long total_suspend_size;
 
 /*
  * The USB VBUS wakeup should be disabled to avoid vbus wake system
@@ -503,7 +500,6 @@ static struct platform_driver mx6_pm_driver = {
 static int __init pm_init(void)
 {
 	int ret = 0;
-	unsigned long suspend_code_size;
 	scu_base = IO_ADDRESS(SCU_BASE_ADDR);
 	gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
 	src_base = IO_ADDRESS(SRC_BASE_ADDR);
@@ -527,20 +523,16 @@ static int __init pm_init(void)
 	suspend_iram_phys_addr = MX6_SUSPEND_IRAM_CODE;
 
 	/* Dont ioremap the address, we have fixed the IRAM address at IRAM_BASE_ADDR_VIRT */
-	suspend_iram_base = (void *)IRAM_BASE_ADDR_VIRT + (suspend_iram_phys_addr - IRAM_BASE_ADDR);
+	suspend_iram_base = IRAM_BASE_ADDR_VIRT + (suspend_iram_phys_addr - IRAM_BASE_ADDR);
 
 	pr_info("cpaddr = %x suspend_iram_base=%x\n",
 		(unsigned int)cpaddr, (unsigned int)suspend_iram_base);
 
-	suspend_code_size = (&mx6_suspend_end -&mx6_suspend_start) *4;
 	/*
 	 * Need to run the suspend code from IRAM as the DDR needs
 	 * to be put into low power mode manually.
 	 */
-	memcpy((void *)suspend_iram_base, mx6_suspend, suspend_code_size);
-
-	/* Now add the space used for storing various registers and IO in suspend. */
-	total_suspend_size = suspend_code_size + MX6_SUSPEND_DATA_SIZE;
+	memcpy((void *)suspend_iram_base, mx6_suspend, MX6_SUSPEND_CODE_SIZE);
 
 	suspend_in_iram = (void *)suspend_iram_base;
 

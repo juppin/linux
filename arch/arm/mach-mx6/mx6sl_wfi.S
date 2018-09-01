@@ -27,8 +27,6 @@
 
 #define IRAM_WAIT_SIZE 	MX6SL_WFI_IRAM_CODE_SIZE
 
-#define MX6_TYPE_DDR3	0
-
 .extern iram_tlb_phys_addr
 .extern mx6sl_wfi_iram_base
 .extern mx6sl_wfi_iram_phys_addr
@@ -151,16 +149,8 @@ fifo_reset2_wait:
 	str	r4, [r1, #0x33c] /* DRAM_SODT0*/
 	str	r4, [r1, #0x340] /* DRAM_SODT1*/
 
-	/* Read DDR type */
-	ldr r4, [r8, #0x18]
-	lsr r4, #3
-	and r4, r4, #0x3
-	cmp r4, #MX6_TYPE_DDR3
-	beq ddr3_skip_io_set  /* keep DRAM_RESET & SDCKE if DDR3 */
-
 	mov	r4, #0x80000
 	str	r4, [r1, #0x320] /* DRAM_RESET */
-ddr3_skip_io_set:  /* keep DRAM_RESET & SDCKE if DDR3 */
 	mov	r4, #0x1000
 	str	r4, [r1, #0x330] /* DRAM_SDCKE0 */
 	str	r4, [r1, #0x334] /* DRAM_SDCKE1 */

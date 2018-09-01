@@ -25,7 +25,6 @@
 #define MX6SL_HW_ID4			IMX_GPIO_NR(4, 7)	/* KEY_ROW7 */
 #define MX6SL_FL_EN				IMX_GPIO_NR(2, 10)	/* EPDC_PWRCTRL3 */
 #define MX6SL_FL_R_EN			IMX_GPIO_NR(1, 29)	/* EPDC_SDCE2 */
-#define MX6SL_FL_W_H_EN			IMX_GPIO_NR(1, 30)	/* EPDC_SDCE3 */
 #define MX6SL_EP_PWRALL			IMX_GPIO_NR(2, 14)	/* EPDC_PWRWAKEUP */
 #define MX6SL_EP_WAKEUP			IMX_GPIO_NR(2, 7)	/* EPDC_PWRCTRL0 */
 #define MX6SL_EP_PWRUP			IMX_GPIO_NR(2, 8)	/* EPDC_PWRCTRL1 */
@@ -64,7 +63,6 @@
 #define GPIO_KB_ROW1			IMX_GPIO_NR(3, 27)	/* ROW1 */
 #define GPIO_KB_ROW2			IMX_GPIO_NR(3, 29)	/* ROW2 */
 
-#define MX6SL_FL_PWR_ON			IMX_GPIO_NR(3, 29)	/* ROW2 */
 #define MX6SL_KL25_INT2			IMX_GPIO_NR(3, 29)	/* ROW2 */
 #if 1
 #define MX6SL_WACOM_INT			IMX_GPIO_NR(4, 0)	/* COL4 */
@@ -76,13 +74,6 @@
 #define MX6SL_WACOM_FWE			IMX_GPIO_NR(3, 24)	/* COL0 */
 #define MX6SL_WACOM_RST			IMX_GPIO_NR(3, 30)	/* COL3 */
 
-
-
-#define FL_COLOR_FLAGS_W			0x0001
-#define FL_COLOR_FLAGS_R			0x0002
-#define FL_COLOR_FLAGS_G			0x0004
-#define FL_COLOR_FLAGS_B			0x0008
-#define FL_COLOR_FLAGS_ALL		0x000f
 extern volatile unsigned gMX6SL_NTX_ACIN_PG;
 extern volatile unsigned gMX6SL_NTX_CHG;
 extern volatile unsigned gMX6SL_MSP_INT;
@@ -97,8 +88,6 @@ extern volatile unsigned gMX6SL_WIFI_3V3;
 extern volatile unsigned gMX6SL_WIFI_RST;
 extern volatile unsigned gMX6SL_WIFI_INT;
 
-extern volatile unsigned gMX6SL_FL_W_H_EN;
-extern volatile unsigned gMX6SL_FL_PWR_EN;
 static iomux_v3_cfg_t mx6sl_brd_ntx_kb_pads[] = {
 	MX6SL_PAD_KEY_COL0__KPP_COL_0,
 	MX6SL_PAD_KEY_COL1__KPP_COL_1,

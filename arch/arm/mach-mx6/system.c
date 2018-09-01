@@ -113,9 +113,6 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
 	int stop_mode = 0;
 	void __iomem *anatop_base = IO_ADDRESS(ANATOP_BASE_ADDR);
 	u32 ccm_clpcr, anatop_val;
-	unsigned int ddr_type;
-
-	ddr_type = (__raw_readl(MMDC_MDMISC_OFFSET) & MMDC_MDMISC_DDR_TYPE_MASK) >> MMDC_MDMISC_DDR_TYPE_OFFSET;
 
 	ccm_clpcr = __raw_readl(MXC_CCM_CLPCR) & ~(MXC_CCM_CLPCR_LPM_MASK);
 	/*
@@ -210,7 +207,7 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
 #if 0
 			if (cpu_is_mx6q() || cpu_is_mx6dl() && (4!=gptHWCFG->m_val.bRamType) ) 
 #else
-			if (cpu_is_mx6q() || cpu_is_mx6dl())
+			if( cpu_is_mx6q() || cpu_is_mx6dl() )
 #endif
 			{
 				/* If stop_mode_config is clear, then 2P5 will be off,
@@ -256,10 +253,9 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
 								 /* <= E60Q30BXX */ 
 				 			  (36==gptHWCFG->m_val.bPCB && gptHWCFG->m_val.bPCB_LVL==1 ) ||
 								 /* <= E60QBXA00 */ 
-				 			  (37==gptHWCFG->m_val.bPCB && gptHWCFG->m_val.bPCB_REV<=0 ) ||
-							  (58==gptHWCFG->m_val.bPCB && 4==gptHWCFG->m_val.bRamType ))
+				 			  (37==gptHWCFG->m_val.bPCB && gptHWCFG->m_val.bPCB_REV<=0 ) ) 
 						{
-							printk("%s Enable weak 2P5\n",__FUNCTION__);
+							//printk("%s<=E60Q2XA14|<=E60Q3XA00\n",__FUNCTION__);
 							/* Enable weak 2P5 linear regulator */
 							anatop_val |= BM_ANADIG_REG_2P5_ENABLE_WEAK_LINREG|
 								BM_ANADIG_REG_2P5_ENABLE_ILIMIT;

@@ -4644,10 +4644,9 @@ static int mxc_epdc_fb_ioctl(struct fb_info *info, unsigned int cmd,
 			break;
 		}
 
-//#if 0
+#if 0
 	case MXCFB_GET_WORK_BUFFER:GALLEN_DBGLOCAL_RUNLOG(8);
-		printk("\n==>NOT skip MXCFB_GET_WORK_BUFFER\n");
-		//ret=0;break;
+		//printk("\n==>skip MXCFB_GET_WORK_BUFFER\n");ret=0;break;															 
 		{
 			/* copy the epdc working buffer to the user space */
 			struct mxc_epdc_fb_data *fb_data = info ?
@@ -4665,7 +4664,7 @@ static int mxc_epdc_fb_ioctl(struct fb_info *info, unsigned int cmd,
 			break;
 		}
 
-//#endif
+#endif
 	default:GALLEN_DBGLOCAL_RUNLOG(9);
 		//printk("\n==>skip unkown fsl epd command %d\n",cmd);ret=0;break;
 		ret = k_fake_s1d13522_ioctl(cmd,arg);
@@ -6043,43 +6042,27 @@ static void mxc_epdc_fb_fw_handler(const struct firmware *fw,
 	else
 	{
 		unsigned char *pbWFHdr = (unsigned char *)(fw->data);
-		if(gptHWCFG->m_val.bPCB>=58) 
-		{
-			// PCB >= E60QJX ...
-			//(*(pbWFHdr+0x15)==0x4d)// AMEPD is ED060SCT .
-			printk("%s(%d):using parameters of ED060SCT \n",__FILE__,__LINE__);
-			fb_data->cur_mode = &fb_data->pdata->epdc_mode[10];// .
-		}
-		else if(gptHWCFG->m_val.bPCB>=46)
-		{
-			// PCB >= E60Q9X ...
-			//(*(pbWFHdr+0x15)==0xd5)// AMEPD is ED060SCQ .
-			printk("%s(%d):using parameters of ED060SCQ \n",__FILE__,__LINE__);
-			fb_data->cur_mode = &fb_data->pdata->epdc_mode[8];// .
-		}
-		else {
-			switch (*(pbWFHdr+0x0d)) {// FPL platform detect .
-			case 0x06: // V220 .
-			case 0x09: // V320 .
-				if(27==gptHWCFG->m_val.bPCB) {
-					printk("%s(%d):V220 for E50610 FPL platform \n",__FILE__,__LINE__);
-					fb_data->cur_mode = &fb_data->pdata->epdc_mode[4];//v220 parameters for E50612 .
-				}
-				else {
-					printk("%s(%d):V220 FPL platform \n",__FILE__,__LINE__);
-					fb_data->cur_mode = &fb_data->pdata->epdc_mode[0];//v220 parameters
-				}
-				break;
-			case 0x03: // V110 .
-			case 0x04: // V110A .
-				printk("%s(%d):V110/V110A FPL platform \n",__FILE__,__LINE__);
-				ASSERT(fb_data->pdata->num_modes>1);
-				fb_data->cur_mode = &fb_data->pdata->epdc_mode[1];//v110 parameters
-				break;
-			default:
-				ERR_MSG("%s(%d):new FPL platform=0x%x ,please modify source to support this \n",__FILE__,__LINE__,*(pbWFHdr+0x0d));
-				break;
+		switch (*(pbWFHdr+0x0d)) {// FPL platform detect .
+		case 0x06: // V220 .
+		case 0x09: // V320 .
+			if(27==gptHWCFG->m_val.bPCB) {
+				printk("%s(%d):V220 for E50610 FPL platform \n",__FILE__,__LINE__);
+				fb_data->cur_mode = &fb_data->pdata->epdc_mode[4];//v220 parameters for E50612 .
 			}
+			else {
+				printk("%s(%d):V220 FPL platform \n",__FILE__,__LINE__);
+				fb_data->cur_mode = &fb_data->pdata->epdc_mode[0];//v220 parameters
+			}
+			break;
+		case 0x03: // V110 .
+		case 0x04: // V110A .
+			printk("%s(%d):V110/V110A FPL platform \n",__FILE__,__LINE__);
+			ASSERT(fb_data->pdata->num_modes>1);
+			fb_data->cur_mode = &fb_data->pdata->epdc_mode[1];//v110 parameters
+			break;
+		default:
+			ERR_MSG("%s(%d):new FPL platform=0x%x ,please modify source to support this \n",__FILE__,__LINE__,*(pbWFHdr+0x0d));
+			break;
 		}
 	}
 
@@ -6556,17 +6539,7 @@ int __devinit mxc_epdc_fb_probe(struct platform_device *pdev)
 		fb_data->cur_mode = &fb_data->pdata->epdc_mode[3];//
 	}
 	else {
-		if(gptHWCFG->m_val.bPCB>=58) {
-			// use SCT digital timing . 
-			fb_data->cur_mode = &fb_data->pdata->epdc_mode[10];
-		}
-		else if(gptHWCFG->m_val.bPCB>=46) {
-			// use SCQ digital timing . 
-			fb_data->cur_mode = &fb_data->pdata->epdc_mode[8];
-		}
-		else {
-			fb_data->cur_mode = &fb_data->pdata->epdc_mode[0];
-		}
+		fb_data->cur_mode = &fb_data->pdata->epdc_mode[0];
 	}
 
 	if(panel_str) {

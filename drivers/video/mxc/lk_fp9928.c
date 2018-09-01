@@ -41,8 +41,6 @@
 
 #define INIT_POWER_STATE	0
 
-#define USE_EPD_PWRSTAT		1
-
 #define GPIO_FP9928_VIN_PADCFG		MX6SL_PAD_EPDC_PWRWAKEUP__GPIO_2_14
 #define GPIO_FP9928_VIN					IMX_GPIO_NR(2,14)
 
@@ -53,13 +51,7 @@
 #define GPIO_FP9928_VCOM_PADCFG			MX6SL_PAD_EPDC_VCOM0__GPIO_2_3	
 #define GPIO_FP9928_VCOM				IMX_GPIO_NR(2,3)
 #define GPIO_FP9928_EP_3V3_IN								IMX_GPIO_NR(4,3) // EPDC_PWRWAKEUP
-#define GPIO_FP9928_EP_3V3_IN_PADCFG				MX6SL_PAD_KEY_ROW5__GPIO_4_3
-
-#define GPIO_FP9928_PWRGOOD							IMX_GPIO_NR(2,13) // EPDC_PWRSTAT
-//#define GPIO_FP9928_PWRGOOD_INT_PADCFG			MX6SL_PAD_EPDC_PWRSTAT__GPIO_2_13_PUINT
-//#define GPIO_FP9928_PWRGOOD_GPIO_PADCFG			MX6SL_PAD_EPDC_PWRSTAT__GPIO_2_13
-#define GPIO_FP9928_PWRGOOD_GPIO_PADCFG		MX6SL_PAD_EPDC_PWRSTAT__GPIO_2_13_FLOATINPUT	
-
+#define GPIO_FP9928_EP_3V3_IN_PADCFG				MX6SL_PAD_KEY_ROW5__GPIO_4_3	
 #else
 // beta version .
 #define GPIO_FP9928_EN_PADCFG			MX6SL_PAD_EPDC_VCOM0__GPIO_2_3	
@@ -97,17 +89,16 @@
 #define FP9928_WAIT_TICKSTAMP(_TickEnd,_wait_item)	\
 {\
 	unsigned long dwTickNow=jiffies,dwTicks;\
-	int iInInterrupt=in_interrupt();\
 	if ( time_before(dwTickNow,_TickEnd) ) {\
 		dwTicks = _TickEnd-dwTickNow;\
-		DBG_MSG("%s() waiting to %ld ticks for %s ... ",__FUNCTION__,dwTicks,_wait_item);\
-		if(iInInterrupt) {\
+		DBG0_MSG("%s() waiting to %ld ticks for %s ... ",__FUNCTION__,dwTicks,_wait_item);\
+		if(in_interrupt()) {\
 			mdelay(jiffies_to_msecs(dwTicks));\
-			DBG_MSG("done(@INT)\n");\
+			DBG0_MSG("done(@INT)\n");\
 		}\
 		else {\
 			msleep(jiffies_to_msecs(dwTicks));\
-			DBG_MSG("done\n");\
+			DBG0_MSG("done\n");\
 		}\
 	}\
 }
@@ -137,14 +128,6 @@ typedef struct tagFP9228_data {
 	unsigned long dwTickEP3V3OffEnd;
 	FP9928_PWRDWN_WORK_PARAM tPwrdwn_work_param;
 	int iIsEP3V3_SW_enabled;
-	int iChipPwrWaitON_ms; // the times to wait FP9928 ON after turnning it ON .
-#ifdef USE_EPD_PWRSTAT //[
-	wait_queue_head_t tWQ_RailPower;
-#else //][!USE_EPD_PWRSTAT
-	int iRailPwrWaitON_ms; // the times to wait rail power stable after enabling EN pin .
-	unsigned long dwTickRailPowerOnEnd;
-#endif //] USE_EPD_PWRSTAT
-
 } FP9928_data;
 
 
@@ -323,12 +306,6 @@ static int _fp9928_gpio_init(void)
 
 	GALLEN_DBGLOCAL_BEGIN();
 
-#ifdef USE_EPD_PWRSTAT //[
-	mxc_iomux_v3_setup_pad(GPIO_FP9928_PWRGOOD_GPIO_PADCFG);
-	gpio_request(GPIO_FP9928_PWRGOOD, "FP9928_PWRGOOD");
-	gpio_direction_input(GPIO_FP9928_PWRGOOD);
-#endif //] USE_EPD_PWRSTAT
-
 	mxc_iomux_v3_setup_pad(GPIO_FP9928_VIN_PADCFG);
 	if(0!=gpio_request(GPIO_FP9928_VIN, "fp9928_VIN")) {
 		WARNING_MSG("%s(),request gpio fp9928_VIN fail !!\n",__FUNCTION__);
@@ -354,7 +331,7 @@ static int _fp9928_gpio_init(void)
 		WARNING_MSG("%s(),request gpio fp9928_VCOM fail !!\n",__FUNCTION__);
 		//gpio_direction_input(GPIO_FP9928_VCOM);
 	}
-	gpio_direction_output(GPIO_FP9928_VCOM,VCOM_OFF);
+	gpio_direction_output(GPIO_FP9928_VCOM,0);
 
 #if defined(GPIO_FP9928_EP_3V3_IN) && (GPIO_FP9928_EP_3V3_IN!=GPIO_FP9928_VIN) //[
 	if(gptFP9928_data->iIsEP3V3_SW_enabled) {
@@ -406,20 +383,11 @@ static void _fp9928_reinit_vcom(void)
 {
 	ASSERT(gptFP9928_data);
 	if(gptFP9928_data->iIsVCOMNeedReInit) {
-		int iRetryCnt;
 		int iChk;
-		
-		for(iRetryCnt=0;iRetryCnt<10;iRetryCnt++)
-		{
-			DBG_MSG("%s():re-write VCOM to 0x%02X\n",__FUNCTION__,FP9928_REG(VCOM_SETTING));
-			iChk = FP9928_REG_SET(VCOM_SETTING,ALL,FP9928_REG(VCOM_SETTING));
-			if(iChk>=0) {
-				gptFP9928_data->iIsVCOMNeedReInit = 0;
-				break;
-			}
-			else {
-				ERR_MSG("%s():re-write VCOM to 0x%02X failed (%d)!!\n",__FUNCTION__,FP9928_REG(VCOM_SETTING),iRetryCnt);
-			}
+		//DBG_MSG("%s():re-write VCOM to 0x%02X\n",__FUNCTION__,FP9928_REG(VCOM_SETTING));
+		iChk = FP9928_REG_SET(VCOM_SETTING,ALL,FP9928_REG(VCOM_SETTING));
+		if(iChk>=0) {
+			gptFP9928_data->iIsVCOMNeedReInit = 0;
 		}
 	}
 }
@@ -449,61 +417,9 @@ static int _fp9928_output_en(int iIsEnable)
 			gpio_direction_output(GPIO_FP9928_EN,EN_ON);
 			gptFP9928_data->iIsOutputEnabled = 1;
 
-#ifdef USE_EPD_PWRSTAT //[
-#else //][!USE_EPD_PWRSTAT
-			gptFP9928_data->dwTickRailPowerOnEnd = jiffies + msecs_to_jiffies(gptFP9928_data->iRailPwrWaitON_ms) ;
-#endif //] USE_EPD_PWRSTAT
-			
-
-			//msleep(10);
+			msleep(10);
 			_fp9928_reinit_vcom();
-			//msleep(13);
-#ifdef USE_EPD_PWRSTAT //[
-
-
-
-			//if(in_interrupt()) 
-			{
-				unsigned long dwTickWaitStart=jiffies,dwTickTimesout,dwTickWaitStop;
-				int iPG=gpio_get_value(GPIO_FP9928_PWRGOOD);
-				unsigned long dwTestCnt=0;
-			
-				dwTickTimesout = dwTickWaitStart + HZ;
-
-				while(!gpio_get_value(GPIO_FP9928_PWRGOOD)) {
-					dwTestCnt++;
-					if(jiffies>=dwTickTimesout) {
-						printk(KERN_WARNING"%s(@INT) : turn on the rail power failed (1s timeout)\n",__FILE__);
-						break;
-					}
-					udelay(10);
-				}
-
-				dwTickWaitStop = jiffies;
-				DBG_MSG("%s(@INT):%d ticks(%d times) taken for rail power waiting,PG %d->%d\n",\
-						__FUNCTION__,dwTickWaitStop-dwTickWaitStart,dwTestCnt,
-						iPG,gpio_get_value(GPIO_FP9928_PWRGOOD));
-			}
-#if 0
-			else {
-				unsigned long dwTickWaitStart=jiffies,dwTickWaitStop;
-				int iPG=gpio_get_value(GPIO_FP9928_PWRGOOD);
-
-				wait_event_timeout(gptFP9928_data->tWQ_RailPower,gpio_get_value(GPIO_FP9928_PWRGOOD),HZ);
-				if(!gpio_get_value(GPIO_FP9928_PWRGOOD)) {
-					printk(KERN_WARNING"%s : turn on the rail power failed (1s timeout)\n",__FILE__);
-				}
-				dwTickWaitStop = jiffies;
-				DBG_MSG("%s():%d ticks taken for rail power waiting,PG %d->%d\n",\
-						__FUNCTION__,dwTickWaitStop-dwTickWaitStart,\
-						iPG,gpio_get_value(GPIO_FP9928_PWRGOOD));
-
-			}
-#endif
-#else //][!USE_EPD_PWRSTAT
-			FP9928_WAIT_TICKSTAMP(gptFP9928_data->dwTickRailPowerOnEnd,"rail power on stable");
-#endif //] USE_EPD_PWRSTAT
-
+			msleep(13);
 
 			gpio_direction_output(GPIO_FP9928_VCOM,VCOM_ON);
 			msleep(10);
@@ -536,7 +452,7 @@ static int _fp9928_vin_onoff(int iIsON)
 			gpio_direction_output(GPIO_FP9928_VIN,VIN_ON);
 			gptFP9928_data->iIsPoweredON = 1;
 			//msleep(10);
-			gptFP9928_data->dwTickPowerOnEnd = jiffies + msecs_to_jiffies(gptFP9928_data->iChipPwrWaitON_ms) ;
+			gptFP9928_data->dwTickPowerOnEnd = jiffies + FP9928_POWERON_WAIT_TICKS;
 		}
 		else {
 			_fp9928_output_en(0);
@@ -711,9 +627,7 @@ int fp9928_suspend(void)
 		}
 		else {
 			#if defined(GPIO_FP9928_EP_3V3_IN) && (GPIO_FP9928_EP_3V3_IN!=GPIO_FP9928_VIN) //[
-			if(gptFP9928_data->iIsEP3V3_SW_enabled) {
-				gpio_direction_output(GPIO_FP9928_EP_3V3_IN,0);
-			}
+			gpio_direction_output(GPIO_FP9928_EP_3V3_IN,0);
 			#endif //] defined(GPIO_FP9928_EP_3V3_IN) && (GPIO_FP9928_EP_3V3_IN!=GPIO_FP9928_VIN)
 		}
 #endif
@@ -739,7 +653,7 @@ void fp9928_shutdown(void)
 #ifdef AVOID_ANIMATION_LOOP //[
 		cancel_delayed_work_sync(&gptFP9928_data->tPwrdwn_work_param.pwrdwn_work);
 #else //][!AVOID_ANIMATION_LOOP
-		fp9928_power_onoff(0,0);
+	fp9928_power_onoff(0,0);
 #endif //] AVOID_ANIMATION_LOOP
 	}
 #ifdef AVOID_ANIMATION_LOOP //[
@@ -775,9 +689,7 @@ void fp9928_shutdown(void)
 		}
 		else {
 			#if defined(GPIO_FP9928_EP_3V3_IN) && (GPIO_FP9928_EP_3V3_IN!=GPIO_FP9928_VIN) //[
-			if(gptFP9928_data->iIsEP3V3_SW_enabled) {
-				gpio_direction_output(GPIO_FP9928_EP_3V3_IN,0);
-			}
+			gpio_direction_output(GPIO_FP9928_EP_3V3_IN,0);
 			#endif //] defined(GPIO_FP9928_EP_3V3_IN) && (GPIO_FP9928_EP_3V3_IN!=GPIO_FP9928_VIN)
 			break;
 		}
@@ -1082,32 +994,13 @@ int fp9928_init(int iPort)
 		else {
 			gptFP9928_data->iIsEP3V3_SW_enabled = 0;
 		}
-#ifdef USE_EPD_PWRSTAT //[
-#else //][!USE_EPD_PWRSTAT
-		gptFP9928_data->iRailPwrWaitON_ms = 10;
-#endif //] USE_EPD_PWRSTAT
-		
-		gptFP9928_data->iChipPwrWaitON_ms = 10;
 	}
 	else {
-#ifdef USE_EPD_PWRSTAT //[
-#else //][!USE_EPD_PWRSTAT
-		gptFP9928_data->iRailPwrWaitON_ms = 60;
-#endif //] USE_EPD_PWRSTAT
-		
 		gptFP9928_data->iIsEP3V3_SW_enabled = 0;
-		gptFP9928_data->iChipPwrWaitON_ms = 50;
 	}
 
 	gptFP9928_data->dwTickPowerOffEnd = jiffies;
 	gptFP9928_data->dwTickPowerOnEnd = jiffies;
-
-#ifdef USE_EPD_PWRSTAT //[
-	init_waitqueue_head(&gptFP9928_data->tWQ_RailPower);
-#else //][!USE_EPD_PWRSTAT
-	gptFP9928_data->dwTickRailPowerOnEnd = jiffies;
-#endif //] USE_EPD_PWRSTAT
-	
 	gptFP9928_data->dwTickEP3V3OffEnd = jiffies;
 
 	iChk = _fp9928_gpio_init();
@@ -1118,9 +1011,14 @@ int fp9928_init(int iPort)
 		goto GPIO_INIT_FAIL;
 	}
 
+	{
+		unsigned long dwTicks,dwTickNow;
 
-	_fp9928_vin_onoff(1);
+		_fp9928_vin_onoff(1);
 
+		dwTickNow = jiffies;
+		FP9928_WAIT_TICKSTAMP(gptFP9928_data->dwTickPowerOnEnd,"power on stable");
+	}
 
 	gptFP9928_data->ptI2C_adapter = i2c_get_adapter(iPort-1);//
 	if( NULL == gptFP9928_data->ptI2C_adapter) {

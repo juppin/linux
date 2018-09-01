@@ -63,21 +63,18 @@ static volatile int giIsSuspending=0;
 static struct rtc_time gtLastRTCtm;
 static struct regulator *g_fl_regulator;
 
-void fl_regulator_enable (int isEnable)
+void fl_pwr_enable (int isEnable)
 {
 	static int s_is_enabled;
 	if (g_fl_regulator && (s_is_enabled != isEnable)) {
 		s_is_enabled = isEnable;
-		printk ("[%s-%d] regulator %d\n",__func__,__LINE__,isEnable);
-		if (1==isEnable||2==isEnable) {
-  		regulator_enable (g_fl_regulator);
-			if(1==isEnable) {
+		printk ("[%s-%d] regulator %s\n",__func__,__LINE__,(isEnable)?"on":"off");
+		if (isEnable) {
+  			regulator_enable (g_fl_regulator);
   			msleep (200);
-			}
-  	}
-		else if(0==isEnable) {
-  		regulator_disable (g_fl_regulator);
-		}
+  		}
+		else
+  			regulator_disable (g_fl_regulator);
 	}
 }
 static DEFINE_SEMAPHORE(msp430_cmd_lockobj);
@@ -431,233 +428,14 @@ void msp430_pm_restart(void)
 	}
 }
 
-#define UNKNOW_FL_ENABLE_STATE 0x0000
-static unsigned short gwMSP430_fl_enable_state=UNKNOW_FL_ENABLE_STATE;
-static volatile int giMSP430_FL_W_idx=0; // FL white control index .
-static volatile unsigned char gbMSP430_RegFLW_dutyL=0xA6,gbMSP430_RegFLW_dutyH=0xA7;
-static volatile int giFLW_duty=-1,giFLW_dutyMin=1,giFLW_dutyMax=400;
-static volatile int giFLR_duty=-1,giFLR_dutyMin=1,giFLR_dutyMax=400;
-static volatile int giFLW_freq=-1,giFLW_freqMin=1,giFLW_freqMax=8000000;
-int msp430_fl_enable(int iColorIDX,int iIsEnable)
+int msp430_fl_enable(int iIsEnable)
 {
 	int iRet = 0;
-	unsigned short wSetState = 0;
-	int i;
-
-	printk("%s(%d,%d)\n",__FUNCTION__,iColorIDX,iIsEnable);
-
-	wSetState = gwMSP430_fl_enable_state;
-	if((MSP430_FL_IDX_ALL==iColorIDX)||(MSP430_FL_IDX_W==iColorIDX)) {
-		if(iIsEnable) {
-			wSetState |= (0x0100<<giMSP430_FL_W_idx);
-		}
-		else {
-			wSetState &= ~(0x0100<<giMSP430_FL_W_idx);
-		}
+	if(iIsEnable) {
+		up_safe_write_reg (0xA3, 0x0100);	// enable front light pwm .
 	}
-	if(4==gptHWCFG->m_val.bFL_PWM) {
-		if((MSP430_FL_IDX_ALL==iColorIDX)||(MSP430_FL_IDX_R==iColorIDX)) {
-			if(iIsEnable) {
-				wSetState |= (0x0100<<0);
-			}
-			else {
-				wSetState &= ~(0x0100<<0);
-			}
-		}
-	}
-	if( wSetState != gwMSP430_fl_enable_state ) {
-		printk("msp430 fl enable 0x%04x\n",wSetState);
-		up_safe_write_reg (0xA3, wSetState);
-		gwMSP430_fl_enable_state = wSetState;
-	}
-	return iRet;
-}
-int msp430_fl_is_enable(int iColorIDX)
-{
-	int iRet=-1;
-	unsigned short wCompState ;
-	if(MSP430_FL_IDX_W==iColorIDX) {
-		wCompState = (0x0100<<giMSP430_FL_W_idx);
-		iRet = (gwMSP430_fl_enable_state&wCompState) ? 1 : 0;
-	}
-	else if(MSP430_FL_IDX_R==iColorIDX) {
-		if(4==gptHWCFG->m_val.bFL_PWM) {
-			wCompState = (0x0100<<0);
-			iRet = (gwMSP430_fl_enable_state&wCompState) ? 1 : 0;
-		}
-	}
-	return iRet;
-}
-
-
-
-int msp430_fl_set_duty(int iColorIDX,int iDuty)
-{
-	int iChk;
-	int iRet=-1;
-
-	iChk = up_cmd_lock(__LINE__);
-	if(iChk<0) {
-		printk("[warning] %s(%d) skipped errorno(%d) \n",__FUNCTION__,__LINE__,iChk);
-		return -2;
-	}
-
-	do {
-		if((MSP430_FL_IDX_ALL==iColorIDX)||(MSP430_FL_IDX_W==iColorIDX)) {
-			if(iDuty<giFLW_dutyMin) {
-				iRet = -3;
-				break;
-			}
-			if(iDuty>giFLW_dutyMax) {
-				iRet = -4;
-				break;
-			}
-			iChk = up_write_reg (gbMSP430_RegFLW_dutyH, iDuty&0xFF00);
-			iChk = up_write_reg (gbMSP430_RegFLW_dutyL, iDuty<<8);
-			giFLW_duty = iDuty;
-			iRet = 0;
-		}
-
-		if(4==gptHWCFG->m_val.bFL_PWM) {
-			if((MSP430_FL_IDX_ALL==iColorIDX)||(MSP430_FL_IDX_R==iColorIDX)) {
-				if(iDuty<giFLR_dutyMin) {
-					iRet = -5;
-					break;
-				}
-				if(iDuty>giFLR_dutyMax) {
-					iRet = -6;
-					break;
-				}
-				iChk = up_write_reg (0xA7, iDuty&0xFF00);
-				iChk = up_write_reg (0xA6, iDuty<<8);
-				giFLR_duty = iDuty;
-				iRet = 0;
-			}
-		}
-	}while(0);
-
-	up_cmd_unlock();
-
-	return iRet;
-}
-
-int msp430_fl_get_duty(int iColorIDX)
-{
-	int iRet=-1;
-	if(MSP430_FL_IDX_W==iColorIDX) {
-		iRet = giFLW_duty;
-	}
-	else if(MSP430_FL_IDX_R==iColorIDX) {
-		iRet = giFLR_duty;
-	}
-	return iRet;
-}
-int msp430_fl_get_duty_max(int iColorIDX)
-{
-	int iRet=-1;
-	if(MSP430_FL_IDX_W==iColorIDX) {
-		iRet = giFLW_dutyMax;
-	}
-	else if(MSP430_FL_IDX_R==iColorIDX) {
-		iRet = giFLR_dutyMax;
-	}
-	return iRet;
-}
-int msp430_fl_get_duty_min(int iColorIDX)
-{
-	int iRet=-1;
-	if(MSP430_FL_IDX_W==iColorIDX) {
-		iRet = giFLW_dutyMin;
-	}
-	else if(MSP430_FL_IDX_R==iColorIDX) {
-		iRet = giFLR_dutyMin;
-	}
-	return iRet;
-}
-
-
-int msp430_fl_set_freq(int iColorIDX,int iFreq)
-{
-	int iChk;
-	int iRet=-1;
-
-	unsigned char bFreqRegHi=0xA5;
-	unsigned char bFreqRegLo=0xA4;
-
-	iChk = up_cmd_lock(__LINE__);
-	if(iChk<0) {
-		printk("[warning] %s(%d) skipped errorno(%d) \n",__FUNCTION__,__LINE__,iChk);
-		return -2;
-	}
-
-	do {
-		if((MSP430_FL_IDX_ALL==iColorIDX)||(MSP430_FL_IDX_W==iColorIDX)) {
-			if(iFreq<giFLW_freqMin) {
-				iRet = -3;
-				break;
-			}
-			if(iFreq>giFLW_freqMax) {
-				iRet = -4;
-				break;
-			}
-			iChk = up_write_reg (bFreqRegHi, iFreq&0xFF00);
-			iChk = up_write_reg (bFreqRegLo, iFreq<<8);
-			giFLW_freq = iFreq;
-			iRet = 0;
-		}
-
-		if(4==gptHWCFG->m_val.bFL_PWM) {
-			if((MSP430_FL_IDX_ALL==iColorIDX)||(MSP430_FL_IDX_R==iColorIDX)) {
-				if(iFreq<giFLW_freqMin) {
-					iRet = -5;
-					break;
-				}
-				if(iFreq>giFLW_freqMax) {
-					iRet = -6;
-					break;
-				}
-				iChk = up_write_reg (bFreqRegHi, iFreq&0xFF00);
-				iChk = up_write_reg (bFreqRegLo, iFreq<<8);
-				giFLW_freq = iFreq;
-				iRet = 0;
-			}
-		}
-	}while(0);
-
-	up_cmd_unlock();
-
-	return iRet;
-}
-int msp430_fl_get_freq(int iColorIDX)
-{
-	int iRet=-1;
-	if(MSP430_FL_IDX_W==iColorIDX) {
-		iRet = giFLW_freq;
-	}
-	else if(MSP430_FL_IDX_R==iColorIDX) {
-		iRet = giFLW_freq;
-	}
-	return iRet;
-}
-int msp430_fl_get_freq_max(int iColorIDX)
-{
-	int iRet=-1;
-	if(MSP430_FL_IDX_W==iColorIDX) {
-		iRet = giFLW_freqMax;
-	}
-	else if(MSP430_FL_IDX_R==iColorIDX) {
-		iRet = giFLW_freqMax;
-	}
-	return iRet;
-}
-int msp430_fl_get_freq_min(int iColorIDX)
-{
-	int iRet=-1;
-	if(MSP430_FL_IDX_W==iColorIDX) {
-		iRet = giFLW_freqMin;
-	}
-	else if(MSP430_FL_IDX_R==iColorIDX) {
-		iRet = giFLW_freqMin;
+	else {
+		up_safe_write_reg(0xA3, 0); // disable front light pwm .
 	}
 	return iRet;
 }
@@ -1674,7 +1452,7 @@ static void acin_pg_chk( void )
 	extern int mxc_usb_plug_getstatus (void);
 
 
-	if((36==gptHWCFG->m_val.bPCB||40==gptHWCFG->m_val.bPCB||50==gptHWCFG->m_val.bPCB||58==gptHWCFG->m_val.bPCB) && 
+	if((36==gptHWCFG->m_val.bPCB||40==gptHWCFG->m_val.bPCB||50==gptHWCFG->m_val.bPCB) && 
 			0x03!=gptHWCFG->m_val.bUIConfig) 
 	{
 		// E60Q32/E60Q5X control charging led if not MP/RD mode . 
@@ -2179,28 +1957,7 @@ static __devinit int msp430_i2c_probe(struct i2c_client *client,
 		// HOME LED is controlled by MSP430 .
 		msp430_homeled_type_set(MSP430_HOMELED_TYPE_NORMAL);
 		//msp430_homeled_enable(1);
-		msp430_set_homeled_delayms(ntx_get_homeled_delay_ms());
-	}
-	if(4==gptHWCFG->m_val.bFL_PWM) {
-		gbMSP430_RegFLW_dutyL = 0xA8;
-		gbMSP430_RegFLW_dutyH = 0xA9;
-		giMSP430_FL_W_idx=1;
-	}
-	if( 0 == NTXHWCFG_TST_FLAG(gptHWCFG->m_val.bFrontLight_Flags,0)) {
-		// FL not boot on .
-		if(0==gptHWCFG->m_val.bFL_PWM || 4==gptHWCFG->m_val.bFL_PWM) {
-			// FL is controlled by MSP430 .
-			gwMSP430_fl_enable_state = 0;
-			msp430_fl_enable (MSP430_FL_IDX_ALL,0);
-		}
-	}
-	else {
-		if(4==gptHWCFG->m_val.bFL_PWM) {
-			gwMSP430_fl_enable_state = 0x0200;
-		}
-		else {
-			gwMSP430_fl_enable_state = 0x0100;
-		}
+		msp430_set_homeled_delayms(1000); //ntx_get_homeled_delay_ms());
 	}
 
 	//Terry:Record initial boot time

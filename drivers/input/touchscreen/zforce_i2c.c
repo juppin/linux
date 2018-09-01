@@ -17,7 +17,6 @@
 #include <linux/hrtimer.h>
 #include <linux/gpio.h>
 #include <linux/irq.h>
-
 #include "../../../arch/arm/mach-mx6/ntx_hwconfig.h"
 extern volatile NTX_HWCONFIG *gptHWCFG;
 
@@ -39,8 +38,6 @@ static const char ZFORCE_TS_NAME[]	= "zForce-ir-touch";
 static struct workqueue_struct *zForce_wq;
 static volatile uint16_t g_touch_pressed, g_touch_triggered, g_ghost_occurred=0, g_touch_suspended;
 static int g_zforce_initial_step;
-static int giIRLED_Signal_AutoCalibration=0;
-static unsigned short gwZforce_FW_verA[4];
 static int custom_touchSizeLimit_set = 0;
 static unsigned long lastINT = 0;
 
@@ -61,7 +58,7 @@ static struct zForce_data {
 
 static uint8_t cmd_Resolution_v2[] = {0xEE, 0x05, 0x02, (DEFAULT_PANEL_H&0xFF), (DEFAULT_PANEL_H>>8), (DEFAULT_PANEL_W&0xFF), (DEFAULT_PANEL_W>>8)};
 static const uint8_t cmd_TouchData_v2[] = {0xEE, 0x01, 0x04};
-static uint8_t cmd_Frequency_v2[] = {0xEE, 0x07, 0x08, 20, 00, 100, 00, 100, 00};
+static const uint8_t cmd_Frequency_v2[] = {0xEE, 0x07, 0x08, 100, 00, 100, 00, 100, 00};
 static const uint8_t cmd_getFirmwareVer_v2[] = {0xEE, 0x01, 0x1E};
 static const uint8_t cmd_Active_v2[] = {0xEE, 0x01, 0x01};
 static const uint8_t cmd_Deactive_v2[] = {0xEE, 0x01, 0x00};
@@ -75,7 +72,7 @@ static uint8_t cmd_LowerPDAmpResp[] = {0xEE, 0x05, 0x22, 0x01, 0x00, 0x75, 0x37}
 
 static uint8_t cmd_Resolution[] = {0x02, (DEFAULT_PANEL_H&0xFF), (DEFAULT_PANEL_H>>8), (DEFAULT_PANEL_W&0xFF), (DEFAULT_PANEL_W>>8)};
 static const uint8_t cmd_TouchData[] = {0x04};
-static const uint8_t cmd_Frequency[] = {0x08,20,100};
+static const uint8_t cmd_Frequency[] = {0x08,10,100};
 static const uint8_t cmd_getFirmwareVer[] = {0x0A};
 static const uint8_t cmd_Active[] = {0x01};
 static const uint8_t cmd_Deactive[] = {0x00};
@@ -252,21 +249,11 @@ static int zForce_ir_touch_recv_data(struct i2c_client *client, uint8_t *buf)
 			}
 			g_zforce_initial_step = 2;
 #else
-			if(giIRLED_Signal_AutoCalibration) {
-//				printk ("[%s-%d] send cmd_FixedSinalStrengthX\n",__func__,__LINE__);
-				zForce_ir_touch_data.PD_Resp = 0x3F;
-				zForce_ir_touch_data.lower_amp_flag = 0;
-				i2c_master_send(client, cmd_FixedSinalStrengthX, sizeof(cmd_FixedSinalStrengthX));
-				g_zforce_initial_step = 1;
-			}
-			else {
-				if(8==gptHWCFG->m_val.bTouchCtrl || 11==gptHWCFG->m_val.bTouchCtrl) {  // v2 & v3
-					i2c_master_send(client, cmd_Resolution_v2, sizeof(cmd_Resolution_v2));
-				}else{
-					i2c_master_send(client, cmd_Resolution, sizeof(cmd_Resolution));
-				}
-				g_zforce_initial_step = 2;
-			}
+//			printk ("[%s-%d] send cmd_FixedSinalStrengthX\n",__func__,__LINE__);
+			zForce_ir_touch_data.PD_Resp = 0x3F;
+			zForce_ir_touch_data.lower_amp_flag = 0;
+			i2c_master_send(client, cmd_FixedSinalStrengthX, sizeof(cmd_FixedSinalStrengthX));
+			g_zforce_initial_step = 1;
 #endif
 			break;
 		case 2:
@@ -306,7 +293,7 @@ static int zForce_ir_touch_recv_data(struct i2c_client *client, uint8_t *buf)
 				i2c_master_send(client, cmd_Dual_touch_v2, sizeof(cmd_Dual_touch_v2));
 			}else{
 				i2c_master_send(client, cmd_Dual_touch, sizeof(cmd_Dual_touch));
-			}
+			}	
 //			printk ("[%s-%d] send cmd_SetConfiguration\n",__func__,__LINE__);
 			g_zforce_initial_step = 3;
 			break;
@@ -356,23 +343,8 @@ static int zForce_ir_touch_recv_data(struct i2c_client *client, uint8_t *buf)
 			break;
 		case 0x1E:
 			if(8==gptHWCFG->m_val.bTouchCtrl || 11==gptHWCFG->m_val.bTouchCtrl) {
-				gwZforce_FW_verA[3] = buf[2]<<8|buf[1];
-				gwZforce_FW_verA[2] = buf[4]<<8|buf[3];
-				gwZforce_FW_verA[1] = buf[6]<<8|buf[5];
-				gwZforce_FW_verA[0] = buf[8]<<8|buf[7];
-
-				printk ("[%s-%d] firmware version %04X %04X %04X %04X \n", __func__, __LINE__, \
-					gwZforce_FW_verA[3],gwZforce_FW_verA[2],gwZforce_FW_verA[1],gwZforce_FW_verA[0]);
-
-				if( gwZforce_FW_verA[3]>=0x0005 && gwZforce_FW_verA[2]>=0x0002 && \
-						gwZforce_FW_verA[1]>=0x0001 )
-				{
-					// QF2 firmware version is 0005 0002 0001 0003
-					// Q92 firmware version is 0005 0002 0001 0000
-					giIRLED_Signal_AutoCalibration=1;
-					printk("[%s-%d] IR signal auto calibration enabled\n",__func__,__LINE__);
-				}
-
+				printk ("[%s-%d] firmware version %02X%02X %02X%02X %02X%02X %02X%02X \n", __func__, __LINE__, \
+					buf[2], buf[1], buf[4], buf[3], buf[6], buf[5], buf[8], buf[7]);
 				printk("[%s-%d] Interface protocol: major=0x%02x, minor=0x%02x\n",__func__,__LINE__,buf[46],buf[47]);
 				if ( (buf[46]==0 && buf[47]==0 ) && 11==gptHWCFG->m_val.bTouchCtrl) {
 					printk("[%s-%d] Warning! using new(v5.2 or later) format with old NN firmware\n",__func__,__LINE__);
@@ -498,7 +470,6 @@ static void zForce_ir_touch_report_data(struct i2c_client *client, uint8_t *buf)
 	int state;
 	int x,y,packets=buf[1];
 	char id, *packet = buf+2;
-	
 	while (packets--) {
 		if(8==gptHWCFG->m_val.bTouchCtrl) {    //neonode v2
 			state = packet[4] & 0x03;
@@ -712,33 +683,12 @@ static ssize_t touchSizeLimit_set(struct device *dev, struct device_attribute *a
 	return count;
 }
 
-static ssize_t scanningFrequency_set(struct device *dev, struct device_attribute *attr,
-				const char *buf, size_t count)
-{
-	int rc = 0;
-	int freq = 0;
-	sscanf (buf,"%d", &freq);
-//	printk( "input values = %d\n", freq);
-	if (freq < 0 || freq > 65535) {
-		printk("Scanning frequency valid range 0~65535\n");
-		return -EINVAL;
-	}
-	cmd_Frequency_v2[5] = freq&0xFF;
-	cmd_Frequency_v2[6] = freq>>8;
-
-	rc = i2c_master_send(zForce_ir_touch_data.client, cmd_Frequency_v2, sizeof(cmd_Frequency_v2));
-
-	return rc?rc:count;
-}
-
 static DEVICE_ATTR(neocmd, 0644, neo_info, neo_ctl);
 static DEVICE_ATTR(touchSizeLimit, S_IWUSR, NULL, touchSizeLimit_set);
-static DEVICE_ATTR(scanningFreq, S_IWUSR, NULL, scanningFrequency_set);
 
 static const struct attribute *sysfs_zforce_attrs[] = {
 	&dev_attr_neocmd.attr,
 	&dev_attr_touchSizeLimit.attr,
-	&dev_attr_scanningFreq.attr,
 	NULL,
 };
 
@@ -968,7 +918,7 @@ static int zForce_ir_touch_probe(
 		goto fail;
 	}
 
-	err = sysfs_create_files(&zForce_ir_touch_data.input->dev.kobj, &sysfs_zforce_attrs);
+	err = device_create_file(&client->dev, &dev_attr_neocmd);
 	if (err) {
 		pr_debug("Can't create device file!\n");
 		return -ENODEV;
@@ -989,7 +939,7 @@ fail:
 
 static int zForce_ir_touch_remove(struct i2c_client *client)
 {
-	sysfs_remove_files(&zForce_ir_touch_data.input->dev.kobj, &sysfs_zforce_attrs);
+	device_remove_file(&client->dev, &dev_attr_neocmd);
 
 	cancel_delayed_work_sync (&zForce_ir_touch_data.work);
 //	destroy_workqueue(&zForce_ir_touch_data.work);

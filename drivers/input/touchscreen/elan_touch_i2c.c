@@ -245,18 +245,15 @@ static void __elan_10A6_calibration (struct i2c_client *client)
 {
 	int rc;
 	uint8_t buf_recv[6] = { 0 };
-	uint8_t cmd_calib0[] = {0x97 ,0xFF ,0xF1 ,0x00 ,0x00 ,0xF1} ;//delay 100ms
-	uint8_t cmd_calib1[] = {0x97 ,0x04 ,0x88 ,0x00 ,0x00 ,0xF1} ;//delay 10ms
-	uint8_t cmd_calib2[] = {0x97 ,0x04 ,0x41 ,0x01 ,0x27 ,0xF1} ;//delay 10ms
-	uint8_t cmd_calib3[] = {0x97 ,0x04 ,0x42 ,0x01 ,0x27 ,0xF1} ;//delay 10ms
-	uint8_t cmd_calib4[] = {0x97 ,0x04 ,0xb2 ,0x00 ,0x00 ,0xF1} ;//delay 10ms
-	uint8_t cmd_calib5[] = {0x97 ,0x04 ,0x54 ,0x00 ,0x06 ,0xF1} ;//delay 10ms
-	uint8_t cmd_calib6[] = {0x97 ,0x04 ,0x55 ,0x03 ,0x84 ,0xF1} ;//delay 10ms
-	uint8_t cmd_calib7[] = {0x97 ,0x04 ,0x56 ,0x03 ,0x20 ,0xF1} ;//delay 10ms
-	uint8_t cmd_calib8[] = {0x97 ,0x04 ,0x75 ,0x02 ,0x58 ,0xF1} ;//delay 10ms
-	uint8_t cmd_calib9[] = {0x97 ,0x04 ,0xd2 ,0x00 ,0x0C ,0xF1} ;//delay 10ms 
-	uint8_t cmd_calib10[] = {0x97 ,0xFF ,0xF0 ,0x00 ,0x00 ,0xF1} ;//delay 200ms
-
+	uint8_t cmd_calib0[] = {0x97, 0xFF, 0xF1, 0x00, 0x00, 0xF1}; //delay 100ms
+	uint8_t cmd_calib1[] = {0x97, 0x04, 0x88, 0x00, 0x00, 0xF1}; //delay 10ms
+	uint8_t cmd_calib2[] = {0x97, 0x04, 0x91, 0x03, 0xe8, 0xF1}; //delay 10ms
+	uint8_t cmd_calib3[] = {0x97, 0x04, 0x31, 0x00, 0x19, 0xF1}; //delay 10ms
+	uint8_t cmd_calib4[] = {0x97, 0x04, 0x75, 0x02, 0x58, 0xF1}; //delay 10ms
+	uint8_t cmd_calib5[] = {0x97, 0x04, 0xd2, 0x00, 0x05, 0xF1}; //delay 10ms
+	uint8_t cmd_calib6[] = {0x97, 0x04, 0xd3, 0x00, 0x02, 0xF1}; //delay 10ms
+	uint8_t cmd_calib7[] = {0x97, 0x04, 0xd4, 0x00, 0x01, 0xF1}; //delay 10ms
+	uint8_t cmd_calib8[] = {0x97, 0xFF, 0xF0, 0x00, 0x00, 0xF1}; //delay 200ms
 	if (!isNTXDiamond || isCalibrated)
 		return;
 
@@ -277,13 +274,8 @@ static void __elan_10A6_calibration (struct i2c_client *client)
 	i2c_master_send(client, cmd_calib7, 6);
 	msleep (10);
 	i2c_master_send(client, cmd_calib8, 6);
-	msleep (10);
-	i2c_master_send(client, cmd_calib9, 6);
-	msleep (10);
-	i2c_master_send(client, cmd_calib10, 6);
 	msleep (200);
-
-	isCalibrated=1;
+	
 	printk ("[%s-%d] 10A6 calibration done. \n", __func__, __LINE__);
 }
 
@@ -348,7 +340,7 @@ static int __elan_touch_init(struct i2c_client *client)
 		if( (0x0DE1==g_fw_id && (0x10A6==g_fw_version||0x10A5==g_fw_version)) || 
 			(0x00B6==g_fw_id && 0x10A1==g_fw_version) ) {
 			__elan_10A6_calibration (client);
-		} else if( 0x0499==g_fw_id || 0x0D01==g_fw_id ){
+		} else {
 			__elan_touch_calibration (client);
 		}
 		return 4;
@@ -518,7 +510,7 @@ static void elan_touch_report_data(struct i2c_client *client, uint8_t *buf)
 		if( (0x0DE1==g_fw_id && (0x10A6==g_fw_version||0x10A5==g_fw_version)) || 
 			(0x00B6==g_fw_id && 0x10A1==g_fw_version) ) {
 			__elan_10A6_calibration (client);
-		} else if( 0x0499==g_fw_id || 0x0D01==g_fw_id ){
+		} else {
 			__elan_touch_calibration (client);
 		}
 		break;
@@ -663,7 +655,7 @@ static int elan_touch_resume(struct platform_device *pdev)
 		if( (0x0DE1==g_fw_id && (0x10A6==g_fw_version||0x10A5==g_fw_version)) || 
 			(0x00B6==g_fw_id && 0x10A1==g_fw_version) ) {
 			__elan_10A6_calibration (elan_touch_data.client);
-		} else if( 0x0499==g_fw_id || 0x0D01==g_fw_id ){
+		} else {
 			__elan_touch_calibration (elan_touch_data.client);
 		}
 	} else {

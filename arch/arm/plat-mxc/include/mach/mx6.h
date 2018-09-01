@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2014 Freescale Semiconductor, Inc. All Rights Reserved.
+ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -79,17 +79,9 @@
  */
 #define MX6_IRAM_TLB_BASE_ADDR	IRAM_BASE_ADDR
 #define MX6_IRAM_TLB_SIZE		SZ_16K
-#define MX6_IRAM_DDR_FREQ_ADDR		(IRAM_BASE_ADDR + MX6_IRAM_TLB_SIZE)
-/*
- * The size defined here includes the code size plus the memory
- * needed to store DDR IOMUX pad settings.
-  */
-#define MX6_IRAM_DDR_FREQ_CODE_SIZE		SZ_4K
-#define TT_ATTRIB_NON_CACHEABLE_1M		0x802
-#define MX6Q_IRAM_BASE_ADDR			(IRAM_BASE_ADDR + MX6_IRAM_TLB_SIZE + MX6_IRAM_DDR_FREQ_CODE_SIZE)
+#define TT_ATTRIB_NON_CACHEABLE_1M	0x802
+#define MX6Q_IRAM_BASE_ADDR		(IRAM_BASE_ADDR + MX6_IRAM_TLB_SIZE)
 #define MX6_SUSPEND_IRAM_CODE		IRAM_BASE_ADDR
-#define MX6_SUSPEND_DATA_SIZE			256
-#define MX6_LPDDR2_WFI_DATA_SIZE		100
 #define MX6_SUSPEND_CODE_SIZE		0x1400
 #define MX6_DDR_FREQ_IRAM_CODE	(MX6_SUSPEND_IRAM_CODE + MX6_SUSPEND_CODE_SIZE)
 #define MX6SL_DDR_FREQ_CODE_SIZE	0x500
@@ -97,8 +89,8 @@
 #define MX6SL_WFI_IRAM_CODE_SIZE	SZ_8K - MX6_SUSPEND_CODE_SIZE - MX6SL_DDR_FREQ_CODE_SIZE
 
 /* The last 4K is for cpu hotplug to workaround wdog issue*/
-#define MX6Q_IRAM_SIZE			(SZ_256K - SZ_4K - MX6_IRAM_TLB_SIZE - MX6_IRAM_DDR_FREQ_CODE_SIZE)
-#define MX6DL_MX6SL_IRAM_SIZE		(SZ_128K - SZ_4K - MX6_IRAM_TLB_SIZE - MX6_IRAM_DDR_FREQ_CODE_SIZE)
+#define MX6Q_IRAM_SIZE			(SZ_256K - SZ_4K)
+#define MX6DL_MX6SL_IRAM_SIZE		(SZ_128K - SZ_4K - MX6_IRAM_TLB_SIZE)
 
 /* Blocks connected via pl301periph */
 #define ROMCP_ARB_BASE_ADDR		0x00000000
@@ -310,8 +302,6 @@
 #define MX6DL_FEC_BASE_ADDR		ENET_BASE_ADDR
 #define MX6Q_MIPI_DSI_BASE_ADDR		MIPI_DSI_BASE_ADDR
 #define	MX6Q_MIPI_CSI2_BASE_ADDR	MIPI_CSI2_BASE_ADDR
-#define MX6Q_EPIT1_BASE_ADDR        EPIT1_BASE_ADDR
-#define MX6Q_EPIT2_BASE_ADDR        EPIT2_BASE_ADDR
 
 /* define virtual address */
 #define PERIPBASE_VIRT			0xF2000000
@@ -523,8 +513,6 @@
 #define MX6Q_INT_FEC			MXC_INT_ENET1
 #define MX6Q_INT_DSI			MXC_INT_DSI
 
-#define MX6Q_INT_EPIT1          MXC_INT_EPIT1
-#define MX6Q_INT_EPIT2          MXC_INT_EPIT2
 #define IRQ_LOCALTIMER			29
 
 /* APBH-DMA */
@@ -602,7 +590,5 @@ extern int mx6q_revision(void);
 extern int mx6dl_revision(void);
 extern int mx6sl_revision(void);
 #endif
-#define MX6_DDR3		(0x0)
-#define MX6_LPDDR2		(0x1)
 
 #endif				/*  __ASM_ARCH_MXC_MX6_H__ */

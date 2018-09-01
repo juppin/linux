@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2014 Freescale Semiconductor, Inc. All Rights Reserved.
+ * Copyright (C) 2010-2012 Freescale Semiconductor, Inc. All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -40,11 +40,8 @@
 #define IRAM_SUSPEND_SIZE 	MX6_SUSPEND_CODE_SIZE
 
 .extern iram_tlb_phys_addr
-.extern total_suspend_size
-.globl mx6_suspend_end
-.globl mx6_suspend_start
-
-#define MX6_TYPE_DDR3	0
+.extern suspend_iram_base
+.extern suspend_iram_phys_addr
 
 /*************************************************************
 mx6_suspend:
@@ -484,15 +481,12 @@ ahb_podf2:
 	str	r0, [r1, #0x33c] /* DRAM_SODT0*/
 	str	r0, [r1, #0x340] /* DRAM_SODT1*/
 
-	cmp r10, #MX6_TYPE_DDR3
-	beq ddr3_skip_io_set  /* keep DRAM_RESET & SDCKE if DDR3 */
 	mov	r0, #0x80000
 	str	r0, [r1, #0x320] /* DRAM_RESET */
 	mov	r0, #0x1000
 	str	r0, [r1, #0x330] /* DRAM_SDCKE0 */
 	str	r0, [r1, #0x334] /* DRAM_SDCKE1 */
 
-ddr3_skip_io_set:
 	.endm
 
 	.macro	dl_ddr_io_save
@@ -937,7 +931,6 @@ Clean L2 cache
 
 	.align 3
 ENTRY(mx6_suspend)
-mx6_suspend_start:
 	stmfd	sp!, {r0-r12}     @ Save registers
 /*************************************************************
 suspend mode entry
@@ -945,12 +938,6 @@ suspend mode entry
 	mov	r12, r3 /* Save CPU type to r12*/
 	mov	r11, r0	/* Save the state in r11 */
 
-	/* Save DDR type to r10 */
-	ldr r6, =MMDC_P0_BASE_ADDR
-	add r6, r6, #PERIPBASE_VIRT
-	ldr r10, [r6, #0x18]
-	lsr r10, #3
-	and r10, r10, #0x3
 	cmp	r12, #MXC_CPU_MX6SL
 	beq	dormant
 
@@ -1010,14 +997,12 @@ never run to here
 dormant entry, data save in stack, save sp in the src_gpr2
 ************************************************************/
 dormant:
-	mov r3, r1
-	mov r0, r1
-	ldr r4,=total_suspend_size
-	ldr r4, [r4]
-	add r0, r0, r4
-	ldr r4, =SRC_BASE_ADDR
-	add r4, r4, #PERIPBASE_VIRT
-	str r0, [r4, #SRC_GPR2_OFFSET] /* set src_gpr2 */
+	mov 	r3, r1
+	mov 	r0, r1
+	add 	r0, r0, #IRAM_SUSPEND_SIZE /* 8K */
+	ldr 	r4, =SRC_BASE_ADDR
+	add 	r4, r4, #PERIPBASE_VIRT
+	str 	r0, [r4, #SRC_GPR2_OFFSET] /* set src_gpr2 */
 /************************************************************
 saved register and context as below:
 	ddr_iomux set
@@ -1041,20 +1026,16 @@ saved register and context as below:
 	/* save mmdc iomux setting, stack is from the tail of
 	iram_suspend base */
 
-	mov r0, r2 		/* get suspend_iram_base */
-	ldr r4,=total_suspend_size
-	ldr r4, [r4]
-	add r0, r0, r4
+	mov	r0, r2 		/* get suspend_iram_base */
+	add	r0, r0, #IRAM_SUSPEND_SIZE	/* 5K */
 
-	mov r4, r12			@ Store cpu type
-	stmfd r0!, {r4}
-	mov r4, r11			@ Store state entered
-	stmfd r0!, {r4}
-	mov r4, r10			@ Store ddr type
-	stmfd r0!, {r4}
+	mov	r4, r12			@ Store cpu type
+	stmfd	r0!, {r4}
+	mov	r4, r11			@ Store state entered
+	stmfd	r0!, {r4}
 
-	ldr r1, =MX6Q_IOMUXC_BASE_ADDR
-	add r1, r1, #PERIPBASE_VIRT
+	ldr	r1, =MX6Q_IOMUXC_BASE_ADDR
+	add	r1, r1, #PERIPBASE_VIRT
 
 	cmp r12, #MXC_CPU_MX6Q
 	bne dl_io_save
@@ -1109,13 +1090,6 @@ ddr_io_save_done:
 	mrc	p15, 0, r6, c12, c0, 0	@ Secure or NS VBAR
 	mrs	r7, cpsr		@ Store CPSR
 	stmfd	r0!, {r4-r7}
-	/* Save diagnostic control register */
-	mrc	p15, 0, r4, c15, c0, 1	@ Diagnostic control reg
-	stmfd	r0!, {r4}
-
-	/* Save Power control register */
-	mrc	p15, 0, r4, c15, c0, 0	@ Diagnostic control reg
-	stmfd	r0!, {r4}
 
 	/* c1 control register */
 	mrc	p15, 0, r4, c1, c0, 0	@ SCTLR
@@ -1142,10 +1116,6 @@ ddr_io_save_done:
 	/* Flush the BTAC. */
 	ldr r6, =0x0
 	mcr p15, 0, r6, c7, c1, 6
-	/* Disable Branch Prediction, Z bit in SCTLR. */
-	mrc    p15, 0, r6, c1, c0, 0
-	bic    r6, r6, #0x800
-	mcr    p15, 0, r6, c1, c0, 0
 
 	ldr r6, =iram_tlb_phys_addr
 	ldr r6, [r6]
@@ -1166,21 +1136,6 @@ ddr_io_save_done:
 	ldr r6, =0x0
 	mcr p15, 0, r6, c8, c3, 0
 
-	/* Disable L1 data cache. */
-	mrc p15, 0, r6, c1, c0, 0
-	bic r6, r6, #0x4
-	mcr p15, 0, r6, c1, c0, 0
-
-	dsb
-
-	/* Disable L2 cache */
-#ifdef CONFIG_CACHE_L2X0
-	ldr r2, =L2_BASE_ADDR
-	add r2, r2, #PERIPBASE_VIRT
-	mov r4, #0x0
-	str r4, [r2, #L2X0_CTRL]
-#endif
- 
 /****************************************************************
 set ddr iomux to low power mode
 ****************************************************************/
@@ -1228,8 +1183,6 @@ ddr_io_set_lpm_done:
 	bne	no_analog_savings
 	cmp	r11, #1
 	bne	no_analog_savings
-	cmp r10, #MX6_TYPE_DDR3
-	beq no_analog_savings
 
 	/* We are here because on
 	* MX6SL, we want to lower
@@ -1365,14 +1318,11 @@ ldo_check_done2:
 
 	ldmea	r0!, {r11}	@ standby or mem
 
-	ldmea   r0!, {r10}	@ ddr type
 	cmp	r12, #MXC_CPU_MX6SL
 	bne	no_analog_restore
 
 	cmp	r11, #0x1
 	bne	no_analog_restore
-	cmp r10, #MX6_TYPE_DDR3
-	beq	no_analog_restore
 
 	ldr	r3, =CCM_BASE_ADDR
 	add	r3, r3, #PERIPBASE_VIRT
@@ -1473,13 +1423,6 @@ poll_dvfs_clear_1:
 	nop
 	nop
 	nop
-	/* Enable L2 cache here */
-#ifdef CONFIG_CACHE_L2X0
-	ldr r2, =L2_BASE_ADDR
-	add r2, r2, #PERIPBASE_VIRT
-	mov r4, #0x1
-	str r4, [r2, #L2X0_CTRL]
-#endif
 
 	mrc	p15, 0, r1, c1, c0, 0
 	orr	r1, r1, #(1 << 2)	@ Enable the C bit
@@ -1499,14 +1442,6 @@ poll_dvfs_clear_1:
 	ldr	r6, =0x0
 	mcr	p15, 0, r6, c8, c3, 0
 
-	/* Enable Branch Prediction, Z bit in SCTLR. */
-	mrc	p15, 0, r6, c1, c0, 0
-	orr	r6, r6, #0x800
-	mcr	p15, 0, r6, c1, c0, 0
-
-	/* Flush the Branch Target Address Cache (BTAC) */
-	ldr	r6, =0x0
-	mcr	p15, 0, r6, c7, c1, 6
 	b 	out	/* exit standby */
 	.ltorg
 
@@ -1515,6 +1450,16 @@ when SOC exit stop mode, arm core restart from here, currently
 are running with MMU off.
 ****************************************************************/
 resume:
+	/*restore it with 0x1f if use ldo bypass mode.*/
+	ldr	r1, =ANATOP_BASE_ADDR
+	ldr	r3, [r1, #0x140]
+	and	r3, r3, #0x1f
+	cmp	r3, #0x1e
+	bne	ldo_check_done3
+	ldr	r3, [r1, #0x140]
+	orr	r3, r3, #0x1f
+	str	r3, [r1, #0x140]
+ldo_check_done3:
 	/* Invalidate L1 I-cache first */
 	mov	r1,	#0x0
 	mcr	p15, 0, r1, c7, c5, 0	@ Invalidate I-Cache
@@ -1527,22 +1472,6 @@ resume:
 	/* Need to invalidate L1 dcache */
 	invalidate_l1_dcache
 
-	/*
-	 * We did power down. Ensure bandgap is stable.
-	 */
-	ldr	r1, =ANATOP_BASE_ADDR
-bg_not_stable:
-
-
-	/*restore it with 0x1f if use ldo bypass mode.*/
-	ldr	r3, [r1, #0x140]
-	and	r3, r3, #0x1f
-	cmp	r3, #0x1e
-	bne	ldo_check_done3
-	ldr	r3, [r1, #0x140]
-	orr	r3, r3, #0x1f
-	str	r3, [r1, #0x140]
-ldo_check_done3:
 	ldr	r0, =SRC_BASE_ADDR
 	str	r1, [r0, #SRC_GPR1_OFFSET] /* clear SRC_GPR1 */
 	ldr	r0, [r0, #SRC_GPR2_OFFSET]
@@ -1551,14 +1480,11 @@ ldo_check_done3:
 
 	ldmea	r0!, {r11}	@ standby or mem
 
-	ldmea   r0!, {r10}	@ ddr type
 	cmp	r12, #MXC_CPU_MX6SL
 	bne	no_analog_restore1
 
 	cmp	r11, #0x1
 	bne	no_analog_restore1
-	cmp r10, #MX6_TYPE_DDR3
-	beq no_analog_restore1
 
 	ldr	r1, =ANATOP_BASE_ADDR
 	ldr	r3, =CCM_BASE_ADDR
@@ -1664,13 +1590,6 @@ poll_dvfs_clear_2:
 	mrc	p15, 0, r6, c12, c0, 0	@ Secure or NS VBAR
 	msr	cpsr, r7		@ store cpsr
 
-	/* Restore diagnostic control register */
-	ldmea	r0!,{r4}
-	mcr	p15, 0, r4, c15, c0, 1	@ Diagnostic control reg
-
-	/* Restore Power control register */
-	ldmea	r0!,{r4}
-	mcr	p15, 0, r4, c15, c0, 0	@ Diagnostic control reg
 	/*
 	 * Enabling MMU here. Page entry needs to be altered
 	 * to create temporary 1:1 map and then resore the entry
@@ -1788,12 +1707,7 @@ out:
 	ldmfd	sp!, {r0-r12}
 	mov	pc, lr
 
-	/*
-	 * Add ltorg here to ensure that all
-	 * literals are stored here and are
-	 * within the text space.
-	 */
-	.ltorg
-mx6_suspend_end:
-
-ENDPROC(mx6_suspend)
+	.type	mx6_do_suspend, #object
+ENTRY(mx6_do_suspend)
+	.word	mx6_suspend
+	.size	mx6_suspend, . - mx6_suspend

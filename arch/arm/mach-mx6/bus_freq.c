@@ -121,8 +121,6 @@ static struct clk *pll3_540;
 
 static struct delayed_work low_bus_freq_handler;
 
-unsigned int mx6sl_ddr_type;
-
 void reduce_bus_freq(void)
 {
 	if (!cpu_is_mx6sl()) {
@@ -190,13 +188,8 @@ printk ("[%s-%d] lp_audio_freq %d (%d)\n",__func__,__LINE__, DDR_AUDIO_CLK, low_
 			/* Save TTBR1 */
 			ttbr1 = save_ttbr1();
 
-			if (mx6sl_ddr_type == MX6_LPDDR2) {
-				mx6sl_ddr_freq_change_iram(DDR_AUDIO_CLK,
+			mx6sl_ddr_freq_change_iram(DDR_AUDIO_CLK,
 							low_bus_freq_mode);
-			}
-			else {
-				update_ddr_freq(DDR_AUDIO_CLK);
-			}
 			restore_ttbr1(ttbr1);
 
 			spin_unlock_irqrestore(&freq_lock, flags);
@@ -248,14 +241,9 @@ printk ("[%s-%d] %d (%d)\n",__func__,__LINE__,LPAPM_CLK, low_bus_freq_mode);
 			outer_sync();
 
 			ttbr1 = save_ttbr1();
-			if (mx6sl_ddr_type == MX6_LPDDR2) {
-				/* Now change DDR freq while running from IRAM. */
-				mx6sl_ddr_freq_change_iram(LPAPM_CLK,
-						low_bus_freq_mode);
-			}
-			else {
-				update_ddr_freq(LPAPM_CLK);
-			}
+			/* Now change DDR freq while running from IRAM. */
+			mx6sl_ddr_freq_change_iram(LPAPM_CLK,
+					low_bus_freq_mode);
 			restore_ttbr1(ttbr1);
 
 			spin_unlock_irqrestore(&freq_lock, flags);
@@ -375,10 +363,7 @@ printk ("[%s-%d] %d (%d)\n",__func__,__LINE__,ddr_normal_rate, low_bus_freq_mode
 		ttbr1 = save_ttbr1();
 
 		/* Change DDR freq in IRAM. */
-		if (mx6sl_ddr_type == MX6_LPDDR2)
-			mx6sl_ddr_freq_change_iram(ddr_normal_rate, low_bus_freq_mode);
-		else
-			update_ddr_freq(ddr_normal_rate);
+		mx6sl_ddr_freq_change_iram(ddr_normal_rate, low_bus_freq_mode);
 
 		restore_ttbr1(ttbr1);
 
@@ -785,26 +770,18 @@ static int __devinit busfreq_probe(struct platform_device *pdev)
 		memcpy(mx6sl_wfi_iram_base, mx6sl_wait, MX6SL_WFI_IRAM_CODE_SIZE);
 		mx6sl_wfi_iram = (void *)mx6sl_wfi_iram_base;
 
-		mx6sl_ddr_type = (__raw_readl(MMDC_MDMISC_OFFSET) & MMDC_MDMISC_DDR_TYPE_MASK) >> MMDC_MDMISC_DDR_TYPE_OFFSET;
+		/* Use preallocated memory */
+		mx6sl_ddr_freq_phys_addr = MX6_DDR_FREQ_IRAM_CODE;
 
-		if (mx6sl_ddr_type == MX6_DDR3) {
-			printk ("[%s-%d] Ram type is DDR3.\n",__func__, __LINE__);
-			init_mmdc_settings();
-		} else {
-			printk ("[%s-%d] Ram type is DDR2. (%d)\n",__func__, __LINE__, mx6sl_ddr_type);
-			/* Use preallocated memory */
-			mx6sl_ddr_freq_phys_addr = MX6_DDR_FREQ_IRAM_CODE;
+		/*
+		 * Don't ioremap the address, we have fixed the IRAM address
+		 * at IRAM_BASE_ADDR_VIRT
+		 */
+		mx6sl_ddr_freq_base = (void *)IRAM_BASE_ADDR_VIRT +
+			(mx6sl_ddr_freq_phys_addr - IRAM_BASE_ADDR);
 
-			/*
-			 * Don't ioremap the address, we have fixed the IRAM address
-			 * at IRAM_BASE_ADDR_VIRT
-			 */
-			mx6sl_ddr_freq_base = (void *)IRAM_BASE_ADDR_VIRT +
-				(mx6sl_ddr_freq_phys_addr - IRAM_BASE_ADDR);
-
-			memcpy(mx6sl_ddr_freq_base, mx6sl_ddr_iram, MX6SL_DDR_FREQ_CODE_SIZE);
-			mx6sl_ddr_freq_change_iram = (void *)mx6sl_ddr_freq_base;
-		}
+		memcpy(mx6sl_ddr_freq_base, mx6sl_ddr_iram, MX6SL_DDR_FREQ_CODE_SIZE);
+		mx6sl_ddr_freq_change_iram = (void *)mx6sl_ddr_freq_base;
 	}
 
 	return 0;

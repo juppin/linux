@@ -44,7 +44,6 @@
 
 #include "../../../drivers/video/mxc/lk_tps65185.h"
 #include "../../../drivers/video/mxc/lk_fp9928.h"
-#include "../../../drivers/misc/ntx-misc.h"
 
 
 //#define _WIFI_ALWAYS_ON_	// wifi always on for startic
@@ -118,18 +117,14 @@
 // Audio functions ...
 #define CM_AUDIO_GET_VOLUME		230
 #define CM_AUDIO_SET_VOLUME		240
-#define CM_FL_LM3630_SET		239
 #define CM_FRONT_LIGHT_SET		241
 #define CM_FRONT_LIGHT_AVAILABLE	242
-#define CM_FL_MSP430_R_DUTY		243
-#define CM_FL_MSP430_FREQUENCY		244
+#define CM_FRONT_LIGHT_DUTY		243
+#define CM_FRONT_LIGHT_FREQUENCY	244
 #define CM_FRONT_LIGHT_R_EN		245
-#define CM_FL_HT68F20_SETDUTY		246
-#define CM_FL_HT68F20_GETDUTY		247
-#define CM_FL_LM3630_TABLE		248
-#define CM_FL_MSP430_W_DUTY		249
-#define CM_FL_MSP430_W_H_EN		250
-#define CM_FL_MSP430_PWM_EN		251
+#define CM_FRONT_LIGHT_HT68F20_SETDUTY	246
+#define CM_FRONT_LIGHT_GETDUTY		247
+#define CM_FRONT_LIGHT_TABLE		248
 
 #define CM_GET_KEYS				107
 
@@ -143,7 +138,6 @@
 
 //Terry add: get display resolution
 #define CM_GET_DISPLAY_RESOLUTION 500
-#define CM_GET_WIFI 501
 
 //xiaobo add: DT request
 #define CM_SET_UPDATE_MODE   600
@@ -238,7 +232,7 @@ struct ebook_device_info {
 };
 
 
-static volatile int giFL_ON=0; // low or high to turn on the FL .
+static volatile int giFL_ON=0;
 
 static unsigned short FL_table0[100]={
 0x0001,0x0006,0x0007,0x0009,0x000C,0x000D,0x000E,0x000F,0x0011,0x0012,
@@ -482,13 +476,11 @@ static struct front_light_setting FL_table[][100]={
 },
 };
 
-struct delayed_work FL_W_off_work;
-struct delayed_work FL_R_off_work;
+struct delayed_work FL_off;
 
-static void FL_module_off(unsigned short wColorFlags);
+static void FL_module_off(void);
 
-void FL_W_off_func(struct work_struct *work);
-void FL_R_off_func(struct work_struct *work);
+void FL_off_func(struct work_struct *work);
 int FL_suspend(void);
 
 //kay for LED thread
@@ -510,9 +502,6 @@ static DECLARE_WAIT_QUEUE_HEAD(WheelKey_WaitQueue);
 ////////////////////
 
 static unsigned int  last_FL_duty = 0;
-static unsigned int  last_FL_R_percent = 0;
-static unsigned int  last_FL_G_percent = 0;
-static unsigned int  last_FL_B_percent = 0;
 static unsigned int  current_FL_freq = 0xFFFF;
 
 
@@ -668,6 +657,8 @@ extern void msp430_power_off(void);
 extern void msp430_pm_restart(void);
 extern void msp430_powerkeep(int n);
 extern int msp430_battery(void);
+extern void msp430_fl_enable (int isEnable);
+extern void fl_pwr_enable (int isEnable);
 extern int up_cmd_lock(int iLockID);
 extern int up_cmd_unlock(void);
 
@@ -684,161 +675,27 @@ extern int up_write_reg(unsigned int reg, unsigned int value);
 extern unsigned int up_safe_read_reg(unsigned int reg);
 extern int msp430_fl_endtime(unsigned short dwFL_EndtimeScale);
 
-extern void fl_regulator_enable(int isEnable);
 int g_power_key_debounce;		// Joseph 20100921 for ESD
 
-volatile static unsigned short gwFL_ColorEnableState=0;
-static DEFINE_MUTEX(fl_pwr_mutex);
-
-static unsigned short _fl_set_ColorFlags(unsigned short wColorFlags,int isEnable)
+static void fl_pwm_enable (int isEnable) 
 {
-	unsigned short wColorFlagsOld;
-
-	if(wColorFlags&FL_COLOR_FLAGS_W) {
-		if(isEnable) 
-			gwFL_ColorEnableState |= FL_COLOR_FLAGS_W;
-		else 
-			gwFL_ColorEnableState &= ~FL_COLOR_FLAGS_W;
-	}
-	
-	if(wColorFlags&FL_COLOR_FLAGS_R) {
-		if(isEnable) 
-			gwFL_ColorEnableState |= FL_COLOR_FLAGS_R;
-		else 
-			gwFL_ColorEnableState &= ~FL_COLOR_FLAGS_R;
-	}
-	
-	if(wColorFlags&FL_COLOR_FLAGS_G) {
-		if(isEnable) 
-			gwFL_ColorEnableState |= FL_COLOR_FLAGS_G;
-		else 
-			gwFL_ColorEnableState &= ~FL_COLOR_FLAGS_G;
-	}
-
-	if(wColorFlags&FL_COLOR_FLAGS_B) {
-		if(isEnable) 
-			gwFL_ColorEnableState |= FL_COLOR_FLAGS_B;
-		else 
-			gwFL_ColorEnableState &= ~FL_COLOR_FLAGS_B;
-	}
-
-	return wColorFlagsOld;
-}
-static unsigned short _fl_get_ColorFlags(void)
-{
-	return gwFL_ColorEnableState;
-}
-
-void fl_pwr_force_enable (int isEnable)
-{
-
-	printk("%s(%d)\n",__FUNCTION__,isEnable);
-	if(1==isEnable||2==isEnable) {
-		gpio_direction_output(gMX6SL_FL_PWR_EN,giFL_ON);
-		if(1==isEnable && !in_interrupt()) {
-			// critical section .
-			fl_regulator_enable(2);
-		}
-	}
-	else if(0==isEnable||-1==isEnable){
-		if(0==isEnable && !in_interrupt()) {
-			// critical section .
-			fl_regulator_enable(0);
-		}
-		gpio_direction_input(gMX6SL_FL_PWR_EN);
-	}
-}
-
-int fl_pwr_enable (unsigned short wColorFlags,int isEnable,int iDelayMS)
-{
-
-	unsigned short wFLOldStatus = _fl_get_ColorFlags();
-	unsigned short wFLNewStatus ;
-	int iRet = -1;
-	int iIsInInterrupt=in_interrupt();
-
-	if(!iIsInInterrupt) {
-		mutex_lock(&fl_pwr_mutex);
-	}
-
-	_fl_set_ColorFlags(wColorFlags,isEnable);
-
-	wFLNewStatus = _fl_get_ColorFlags();
-
-	printk("%s(0x%x,new=0x%x,old=0x%x)\n",__FUNCTION__,wColorFlags,wFLNewStatus,wFLOldStatus);
-	if(isEnable) {
-		if(0==wFLOldStatus) {
-			fl_pwr_force_enable(1);
-			iRet = 1;
-			if(iDelayMS>0) {
-				if(iIsInInterrupt) {
-					mdelay(iDelayMS);
-				}
-				else {
-					msleep(iDelayMS);
-				}
-			}
-		}
-	}
-	else {
-		if(4==gptHWCFG->m_val.bFL_PWM||2==gptHWCFG->m_val.bFL_PWM||
-			 6==gptHWCFG->m_val.bFL_PWM||7==gptHWCFG->m_val.bFL_PWM) 
-		{
-			// single lm3630a .
-		}
-		else if (wFLOldStatus && 0==wFLNewStatus){
-			if(iDelayMS>0) {
-				if(iIsInInterrupt) {
-					mdelay(iDelayMS);
-				}
-				else {
-					msleep(iDelayMS);
-				}
-			}
-			fl_pwr_force_enable(0);
-			iRet = 0;
-		}
-	}
-
-	if(!iIsInInterrupt) {
-		mutex_unlock(&fl_pwr_mutex);
-	}
-
-	return iRet;
-}
-
-
-
-static void fl_pwm_enable (unsigned short wColorFlags,int isEnable) 
-{
-
+	static int s_pwm_enabled=1;
 	if(1==gptHWCFG->m_val.bFL_PWM)
 	{
-		ht68f20_enable (isEnable);
-		if (isEnable) {
-			mxc_iomux_v3_setup_pad (MX6SL_PAD_I2C1_SCL__I2C1_SCL);
-			mxc_iomux_v3_setup_pad (MX6SL_PAD_I2C1_SDA__I2C1_SDA);
-		}
-		else {
-			mxc_iomux_v3_setup_pad (MX6SL_PAD_I2C1_SCL__GPIO_3_12);
-			mxc_iomux_v3_setup_pad (MX6SL_PAD_I2C1_SDA__GPIO_3_13);
-		}
-	}
-	else {
-		if(wColorFlags & FL_COLOR_FLAGS_W) {
-			if(0==gptHWCFG->m_val.bFL_PWM || 4==gptHWCFG->m_val.bFL_PWM) {
-				msp430_fl_enable(MSP430_FL_IDX_W,isEnable);
+		if (s_pwm_enabled != isEnable) {
+			s_pwm_enabled = isEnable;
+			ht68f20_enable (isEnable);
+			if (isEnable) {
+				mxc_iomux_v3_setup_pad (MX6SL_PAD_I2C1_SCL__I2C1_SCL);
+				mxc_iomux_v3_setup_pad (MX6SL_PAD_I2C1_SDA__I2C1_SDA);
 			}
-		}
-
-		if(wColorFlags & FL_COLOR_FLAGS_R) {
-			if(4==gptHWCFG->m_val.bFL_PWM) {	
-				msp430_fl_enable(MSP430_FL_IDX_R,isEnable);
+			else {
+				mxc_iomux_v3_setup_pad (MX6SL_PAD_I2C1_SCL__GPIO_3_12);
+				mxc_iomux_v3_setup_pad (MX6SL_PAD_I2C1_SDA__GPIO_3_13);
 			}
 		}
 	}
 }
-
 
 unsigned long long hwconfig = 0x0000000011000001LL;
 EXPORT_SYMBOL(hwconfig);
@@ -872,49 +729,14 @@ int kl25_int_status (void)
 	return gpio_get_value (MX6SL_KL25_INT2)?1:0;
 }
 
-#define LM3630_BRIGTNESS_MIN	0x04
-//static unsigned char gbGCur=0,gbGBrig=LM3630_BRIGTNESS_MIN;
-//static unsigned char gbBCur=0,gbBBrig=LM3630_BRIGTNESS_MIN;
-extern int fl_lm3630a_percentageEx (int iChipIdx,int iFL_Percentage);
+extern int fl_lm3630a_percentage (int iFL_Percentage);
 extern int fl_lm3630a_set_color (int iFL_color);
-extern int fl_lm3630a_set_colorEx (int iChipIdx,int iFL_color);
-extern void lm3630a_set_FL (unsigned char led_A_current, unsigned char led_A_brightness,
-		unsigned char led_B_current, unsigned char led_B_brightness);
-void lm3630a_set_FL_EX (int iChipIdx,
-		unsigned char led_A_current, unsigned char led_A_brightness,
-		unsigned char led_B_current, unsigned char led_B_brightness);
 
-extern int lm3630a_get_FL_EX (int iChipIdx,
-		unsigned char *O_pbLed_A_current, unsigned char *O_pbLed_A_brightness,
-		unsigned char *O_pbLed_B_current, unsigned char *O_pbLed_B_brightness);
-int lm3630a_get_default_power_by_table(int iFL_table_idx,unsigned char *O_pbPower);
-
-int fl_get_color_percentage(unsigned short wColorFlags)
-{
-	int iRet=-1;
-	if(FL_COLOR_FLAGS_W==wColorFlags) {
-		iRet = last_FL_duty;
-	}
-	else if(FL_COLOR_FLAGS_R==wColorFlags) {
-		iRet = last_FL_R_percent;
-	}
-	else if(FL_COLOR_FLAGS_G==wColorFlags) {
-		iRet = last_FL_G_percent;
-	}
-	else if(FL_COLOR_FLAGS_B==wColorFlags) {
-		iRet = last_FL_B_percent;
-	}
-	return iRet;
-}
-int fl_set_color_percentage(unsigned short wColorFlags,int iFL_Percentage)
+int fl_set_percentage(int iFL_Percentage)
 {
 	int iRet = 0;
 	int p=iFL_Percentage;
 
-	unsigned short wFLOldStatus = _fl_get_ColorFlags();
-
-	printk("%s(0x%x,%d),FL old status=0x%x\n",__FUNCTION__,
-			wColorFlags,iFL_Percentage,wFLOldStatus);
 	
 	if(0==gptHWCFG->m_val.bFrontLight)
 		return -1;
@@ -924,13 +746,13 @@ int fl_set_color_percentage(unsigned short wColorFlags,int iFL_Percentage)
 		 // HT68F20
 
 		if (p) {
-			fl_pwm_enable (FL_COLOR_FLAGS_W,1);
-			if(delayed_work_pending(&FL_W_off_work)){
-				cancel_delayed_work_sync(&FL_W_off_work);
-				printk("FL_W_off delayed work canceled");
+			fl_pwm_enable (1);
+			if(delayed_work_pending(&FL_off)){
+				cancel_delayed_work_sync(&FL_off);
+				printk("FL_off delayed work canceled");
 			}
 			printk ("\nset front light level : %d\n",p);
-			if(p<=100)
+			if(p>0 && p<=100)
 			{
 				// temporary table 
 				// for first 70 levels, fl_r_en = 0 
@@ -948,14 +770,14 @@ int fl_set_color_percentage(unsigned short wColorFlags,int iFL_Percentage)
 					duty = 150 + (p-70)*12;
 				}
 				if (last_FL_duty >= p)
-					gpio_direction_output (gMX6SL_FL_W_H_EN, fl_r_en);
+					gpio_direction_output (MX6SL_FL_R_EN, fl_r_en);
 				
 				ht68f20_write_reg (0xA6, duty&0xFF);	// Set PWM duty
 				ht68f20_write_reg (0xA7, duty>>8);
 				printk ("Set front light duty : %d\n",duty);
 
 				if (last_FL_duty < p)
-					gpio_direction_output (gMX6SL_FL_W_H_EN, fl_r_en);
+					gpio_direction_output (MX6SL_FL_R_EN, fl_r_en);
 			}
 			else{
 				printk("Wrong number! level range from 0 to 100\n");
@@ -963,321 +785,115 @@ int fl_set_color_percentage(unsigned short wColorFlags,int iFL_Percentage)
 			if (0 == last_FL_duty){
 				ht68f20_write_reg (0xA3, 0x01);	// enable front light pwm
 
-				fl_pwr_enable(FL_COLOR_FLAGS_W,1,10);
+				msleep(100);
+				gpio_direction_output(MX6SL_FL_EN,giFL_ON);
 			}
 		}
 		else if(last_FL_duty != 0){
 			printk ("FL PWM off command\n");
 			ht68f20_write_reg(0xA3, 0); 
-			schedule_delayed_work(&FL_W_off_work, 120);
+			schedule_delayed_work(&FL_off, 120);
 		}
 		last_FL_duty = p;
 		
 	}
-	else if(0==gptHWCFG->m_val.bFL_PWM||
-			4==gptHWCFG->m_val.bFL_PWM||
-			5==gptHWCFG->m_val.bFL_PWM||
-			6==gptHWCFG->m_val.bFL_PWM||
-			7==gptHWCFG->m_val.bFL_PWM)
+	else
 	{
-		int iMSP430_color_idx;
-
-
-
-
-		if(4==gptHWCFG->m_val.bFL_PWM || 5==gptHWCFG->m_val.bFL_PWM||
-			6==gptHWCFG->m_val.bFL_PWM||7==gptHWCFG->m_val.bFL_PWM) 
-		{
-			unsigned char bBCurr,bBBrig;
-			unsigned char bGCurr,bGBrig;
-			unsigned char bWCurr,bWBrig;
-			unsigned char bRCurr,bRBrig;
-
-			// msp430+lm3630 | lm3636 x 2 .
-			lm3630a_get_FL_EX(0,&bBCurr,&bBBrig,&bGCurr,&bGBrig);
-			if(FL_COLOR_FLAGS_G==wColorFlags) {
-				if(0==p) {
-					bGCurr=0;
-					bGBrig=LM3630_BRIGTNESS_MIN;
-				}
-				else if(p<=100){
-					if(0==last_FL_G_percent) {
-						fl_pwr_enable(wColorFlags,1,10);
-					}
-					else {
-						fl_pwr_enable(wColorFlags,1,0);
-					}
-					lm3630a_get_default_power_by_table(gptHWCFG->m_val.bFrontLight,&bGCurr);
-					//gbGBrig=(p*255)/100;
-					bGBrig=p+151;
-				}
-
-				lm3630a_set_FL(bBCurr,bBBrig,bGCurr,bGBrig);
-
-				if(0==p) {
-					if(0==last_FL_G_percent) {
-						fl_pwr_enable(wColorFlags,0,0);
-					}
-					else {
-						fl_pwr_enable(wColorFlags,0,10);
-					}
-				}
-				last_FL_G_percent=p;
-				return 0;
-			}
-			else if(FL_COLOR_FLAGS_B==wColorFlags) {
-				if(0==p) {
-					bBCurr=0;
-					bBBrig=LM3630_BRIGTNESS_MIN;
-				}
-				else if(p<=100){
-					if(0==last_FL_B_percent) {
-						fl_pwr_enable(wColorFlags,1,10);
-					}
-					else {
-						fl_pwr_enable(wColorFlags,1,0);
-					}
-					lm3630a_get_default_power_by_table(gptHWCFG->m_val.bFrontLight,&bBCurr);
-					//gbBBrig=(p*255)/100;
-					bBBrig=p+151;
-				}
-				lm3630a_set_FL(bBCurr,bBBrig,bGCurr,bGBrig);
-
-				if(0==p) {
-					if(0==last_FL_B_percent) {
-						fl_pwr_enable(wColorFlags,0,0);
-					}
-					else {
-						fl_pwr_enable(wColorFlags,0,10);
-					}
-				}
-				last_FL_B_percent=p;
-				return 0;
-			}
-
-			if(5==gptHWCFG->m_val.bFL_PWM||6==gptHWCFG->m_val.bFL_PWM||7==gptHWCFG->m_val.bFL_PWM) 
-			{
-				lm3630a_get_FL_EX(1,&bWCurr,&bWBrig,&bRCurr,&bRBrig);
-
-				if(FL_COLOR_FLAGS_W==wColorFlags) {
-					if(0==p) {
-						bWCurr=0;
-						bWBrig=LM3630_BRIGTNESS_MIN;
-					}
-					else if(p<=100){
-						if(0==last_FL_duty) {
-							fl_pwr_enable(wColorFlags,1,10);
-						}
-						else {
-							fl_pwr_enable(wColorFlags,1,0);
-						}
-						lm3630a_get_default_power_by_table(gptHWCFG->m_val.bFrontLight,&bWCurr);
-						//gbBBrig=(p*255)/100;
-						bWBrig=p+151;
-					}
-
-					if(6==gptHWCFG->m_val.bFL_PWM) {
-						lm3630a_set_FL_EX(0,bWCurr,bWBrig,0,0);
-					}
-					else if(7==gptHWCFG->m_val.bFL_PWM) {
-						lm3630a_set_FL_EX(0,0,0,bWCurr,bWBrig);
-					}
-					else {
-						lm3630a_set_FL_EX(1,bWCurr,bWBrig,bRCurr,bRBrig);
-					}
-
-					if(0==p) {
-						if(0==last_FL_duty) {
-							fl_pwr_enable(wColorFlags,0,0);
-						}
-						else {
-							fl_pwr_enable(wColorFlags,0,10);
-						}
-					}
-					last_FL_duty=p;
-					return 0;
-				}
-			}
-
-			if(5==gptHWCFG->m_val.bFL_PWM) {
-				if(FL_COLOR_FLAGS_R==wColorFlags) {
-					if(0==p) {
-						bRCurr=0;
-						bRBrig=LM3630_BRIGTNESS_MIN;
-					}
-					else if(p<=100){
-						if(0==last_FL_R_percent) {
-							fl_pwr_enable(wColorFlags,1,10);
-						}
-						else {
-							fl_pwr_enable(wColorFlags,1,0);
-						}
-						lm3630a_get_default_power_by_table(gptHWCFG->m_val.bFrontLight,&bRCurr);
-						//gbBBrig=(p*255)/100;
-						bRBrig=p+151;
-					}
-					lm3630a_set_FL_EX(1,bWCurr,bWBrig,bRCurr,bRBrig);
-
-					if(0==p) {
-						if(0==last_FL_R_percent) {
-							fl_pwr_enable(wColorFlags,0,0);
-						}
-						else {
-							fl_pwr_enable(wColorFlags,0,10);
-						}
-					}
-					last_FL_R_percent=p;
-					return 0;
-				}
-			}
-		}
-		else {
-			//return -1;
-		}
-		if(FL_COLOR_FLAGS_W==wColorFlags) {
-			iMSP430_color_idx = MSP430_FL_IDX_W;
-		}
-		else if(FL_COLOR_FLAGS_R==wColorFlags) {
-			iMSP430_color_idx = MSP430_FL_IDX_R;
-		}
-		
-		// FL PWM source from MSP430 .
 		if (p) {
-
-			if(FL_COLOR_FLAGS_W==wColorFlags) {
-				if(0==last_FL_duty) {
-					fl_pwr_enable (wColorFlags,1,100);
-				}
-				else {
-					fl_pwr_enable (wColorFlags,1,0);
-				}
-				if(delayed_work_pending(&FL_W_off_work)){
-					cancel_delayed_work_sync(&FL_W_off_work);
-					printk("FL_W_off_work delayed work canceled");
-				}
+			if ((0==last_FL_duty) && (50==gptHWCFG->m_val.bPCB) ){
+				fl_pwr_enable (1);
+				gpio_direction_output(MX6SL_FL_EN,giFL_ON);
+				msleep(100);
 			}
-			else if(FL_COLOR_FLAGS_R==wColorFlags) {
-				if(0==last_FL_R_percent) {
-					fl_pwr_enable (wColorFlags,1,100);
-				}
-				else {
-					fl_pwr_enable (wColorFlags,1,0);
-				}
-				if(delayed_work_pending(&FL_R_off_work)){
-					cancel_delayed_work_sync(&FL_R_off_work);
-					printk("FL_R_off_work delayed work canceled");
-				}
+			if(delayed_work_pending(&FL_off)){
+				cancel_delayed_work_sync(&FL_off);
+				printk("FL_off delayed work canceled");
 			}
-			else {
-				// wrong color .
-				printk(KERN_ERR "%s():Wrong color flag(%x)!!!\n",__FUNCTION__,wColorFlags);
-			}
-
 			printk ("\nset front light level : %d\n",p);
-			if(p<=100)
+			if(p>0 && p<=100)
 			{
+				int iChk;
+				iChk = up_cmd_lock(__LINE__);
+				if(iChk<0) {
+					printk("[warning] %s(%d) skipped errorno(%d) \n",__FUNCTION__,__LINE__,iChk);
+					return -1;
+				}
 				
 				if( gptHWCFG->m_val.bFrontLight == 3){  //TABLE0a
-					msp430_fl_set_freq(iMSP430_color_idx,0x0190);
-					msp430_fl_set_duty(iMSP430_color_idx,FL_table0[p-1]);
+					up_write_reg (0xA5, 0x0100);
+					up_write_reg (0xA4, 0x9000);
+					up_write_reg (0xA7, FL_table0[p-1]&0xFF00);
+					up_write_reg (0xA6, FL_table0[p-1]<<8);
 					printk("PWMCNT : 0x%04x\n", FL_table0[p-1]);
 				}
 				else if( gptHWCFG->m_val.bFrontLight == 1 || gptHWCFG->m_val.bFrontLight == 2 ){  //TABLE0, TABLE0+
-					if (!wFLOldStatus){
-						msp430_fl_set_freq(iMSP430_color_idx,0x0190);
+					if (0 == last_FL_duty){
+						up_write_reg (0xA5, 0x0100);	
+						up_write_reg (0xA4, 0x9000);
 					}
 					if(p<=50){
-						if(FL_COLOR_FLAGS_W==wColorFlags) {
-							gpio_direction_output(gMX6SL_FL_W_H_EN,0);
-						}
-						msp430_fl_set_duty(iMSP430_color_idx,FL_table0[2*(p-1)]);
+						gpio_direction_output(MX6SL_FL_R_EN,0);
+						up_write_reg (0xA7, FL_table0[2*(p-1)]&0xFF00);	
+						up_write_reg (0xA6, FL_table0[2*(p-1)]<<8);
 						printk("PWMCNT : 0x%04x\n", FL_table0[2*(p-1)]);
 					}else{
-						if(FL_COLOR_FLAGS_W==wColorFlags) {
-							gpio_direction_output(gMX6SL_FL_W_H_EN,1);
-						}
-						msp430_fl_set_duty(iMSP430_color_idx,FL_table0[p-1]);
+						gpio_direction_output(MX6SL_FL_R_EN,1);
+						up_write_reg (0xA7, FL_table0[p-1]&0xFF00);
+						up_write_reg (0xA6, FL_table0[p-1]<<8);
 						printk("PWMCNT : 0x%04x\n", FL_table0[p-1]);
 					}
 				}
-				else {  
+				else{  
 					int t_no = gptHWCFG->m_val.bFrontLight-4; // mapping hwconfig to FL_table
-					int freq ;
-					int iDuty ,iFreq;
+					int freq = 8000000/FL_table[t_no][p-1].freq;
 
-#if 0
 					if (30 == gptHWCFG->m_val.bPCB && p==5) { //E606E2
 						p=1;
 					}
-#endif 
 
-					if(FL_COLOR_FLAGS_W==wColorFlags) {
-						if (last_FL_duty >= p)
-							gpio_direction_output (gMX6SL_FL_W_H_EN, FL_table[t_no][p-1].fl_r_en);
-						iFreq = FL_table[t_no][p-1].freq;
-						iDuty = FL_table[t_no][p-1].duty;
-					}
-					else {
-						iFreq = 20000; // fix at 20KHZ .
-						iDuty = p<<2;
-					}
+					if (last_FL_duty >= p)
+						gpio_direction_output (MX6SL_FL_R_EN, FL_table[t_no][p-1].fl_r_en);					
 
 					if( freq != current_FL_freq){
-						printk ("Set front light %d Frequency : %d\n",
-								iMSP430_color_idx,iFreq);
-						freq = 8000000/iFreq;
-						msp430_fl_set_freq(iMSP430_color_idx,freq);
+						printk ("Set front light Frequency : %d\n",FL_table[t_no][p-1].freq);	
+						up_write_reg (0xA5, freq&0xFF00);	// Set Frequency 8M/freq
+						up_write_reg (0xA4, freq<<8);
 						current_FL_freq = freq;
 					}
+					up_write_reg (0xA7, FL_table[t_no][p-1].duty&0xFF00);	// Set PWM duty
+					up_write_reg (0xA6, FL_table[t_no][p-1].duty<<8);
+					printk ("Set front light duty : %d\n",FL_table[t_no][p-1].duty);	
 
-					if(FL_COLOR_FLAGS_W==wColorFlags) {
-						msp430_fl_set_duty(iMSP430_color_idx,iDuty);
-						if (last_FL_duty < p)
-							gpio_direction_output (gMX6SL_FL_W_H_EN, FL_table[t_no][p-1].fl_r_en);
-					}
-					else {
-						msp430_fl_set_duty(iMSP430_color_idx,iDuty);
-					}
-
-					printk ("Set front light %d duty : %d\n",
-						iMSP430_color_idx,iDuty);
+					if (last_FL_duty < p)
+						gpio_direction_output (MX6SL_FL_R_EN, FL_table[t_no][p-1].fl_r_en);			
 				}
+				up_cmd_unlock();
 			}
 			else{
 				printk("Wrong number! level range from 0 to 100\n");
 			}
-			msp430_fl_endtime(0xffff); // Disable front light auto off timer .
-			fl_pwm_enable(wColorFlags,1);
-			//fl_pwr_enable (wColorFlags,1,0);
-		}
-		else if(p==0) {
-			if (wFLOldStatus&wColorFlags){
-				printk ("FL 0x%x tunning off \n",wColorFlags);
-				fl_pwm_enable(wColorFlags,0);
-				if(FL_COLOR_FLAGS_W==wColorFlags) {
-					schedule_delayed_work(&FL_W_off_work, 120);
-				}
-				else if(FL_COLOR_FLAGS_R==wColorFlags) {
-					schedule_delayed_work(&FL_R_off_work, 120);
+			if (0 == last_FL_duty){
+				msp430_fl_endtime(0xffff); // Disable front light auto off timer .
+
+				msp430_fl_enable(1);
+
+				if (50!=gptHWCFG->m_val.bPCB) {
+					msleep(100);
+					gpio_direction_output(MX6SL_FL_EN,giFL_ON);
+					fl_pwr_enable (1);
 				}
 			}
 		}
-		if(FL_COLOR_FLAGS_W==wColorFlags) {
-			last_FL_duty = p;
+		else if(last_FL_duty != 0){
+			printk ("FL PWM off command\n");
+			msp430_fl_enable(0);
+			schedule_delayed_work(&FL_off, 120);
 		}
-		else if(FL_COLOR_FLAGS_R==wColorFlags) {
-			last_FL_R_percent = p;
-		}
-
-	}
-
+		last_FL_duty = p;
+	} 
 	return iRet;
 }
 
-int fl_set_percentage(int iFL_Percentage)
-{
-	return fl_set_color_percentage(FL_COLOR_FLAGS_W,iFL_Percentage);
-}
 //Terry add 20121220 : save device state
 static int g_device_state = UNSET;
 void setDeviceState (int current_state) {
@@ -1309,10 +925,10 @@ static void ntx_system_reset(const char *pszDomain)
 	}
 
 	if(0!=gptHWCFG->m_val.bFrontLight){
-		fl_pwm_enable(FL_COLOR_FLAGS_ALL,0);
+		msp430_fl_enable(0);
 		msleep (1200);
 
-		FL_module_off(FL_COLOR_FLAGS_ALL);
+		FL_module_off();
 	}
 
 	while (1) {
@@ -1339,14 +955,14 @@ static void ntx_system_poweroff(const char *pszDomain)
 
 		if(0!=gptHWCFG->m_val.bFrontLight){
 			
-			if(0==gptHWCFG->m_val.bFL_PWM || 4==gptHWCFG->m_val.bFL_PWM) {
+			if(0==gptHWCFG->m_val.bFL_PWM) {
 				// FL is controlled by MSP430 .
-				fl_pwm_enable(FL_COLOR_FLAGS_ALL,0);
+				msp430_fl_enable (0); 
 			}
 
 			msleep (1200);
 
-			FL_module_off(FL_COLOR_FLAGS_ALL);
+			FL_module_off();
 		}
 
 		LED_conitnuous = 0;
@@ -1411,13 +1027,11 @@ static int  ioctlDriver(struct file *filp, unsigned int command, unsigned long a
 				i = ricoh619_battery_2_msp430_adc();
 				if (0 == i)
 					i = 0x8000;
-				printk("xiaobo kernel ioctrl CM_GET_BATTERY_STATUS PMIC %d\n" + i);
 			}
 			else {
 				i = msp430_battery ();
 				if (0 == i)
 					i = 0x8000;
-				printk("xiaobo kernel ioctrl CM_GET_BATTERY_STATUS msp430_battery gauge %d\n" + i);
 			}
 			copy_to_user((void __user *)arg, &i, sizeof(unsigned long));
 
@@ -1661,36 +1275,20 @@ static int  ioctlDriver(struct file *filp, unsigned int command, unsigned long a
 			break;
 
 		case CM_FRONT_LIGHT_SET:
-			if (2==gptHWCFG->m_val.bFL_PWM||6==gptHWCFG->m_val.bFL_PWM||7==gptHWCFG->m_val.bFL_PWM) {
-				fl_lm3630a_percentageEx (0,p);
-			}
-			else if(5==gptHWCFG->m_val.bFL_PWM) {
-				fl_lm3630a_percentageEx (1,p);
-			}
+			if (4==gptHWCFG->m_val.bFrontLight_LED_Driver)
+				fl_lm3630a_percentage (p);
 			else
 				fl_set_percentage(p);
 			break;
 
-		case CM_FL_LM3630_SET:
-				if (2==gptHWCFG->m_val.bFL_PWM||6==gptHWCFG->m_val.bFL_PWM||7==gptHWCFG->m_val.bFL_PWM) {
-					fl_lm3630a_percentageEx (0,p);
-				}
-				else if (5==gptHWCFG->m_val.bFL_PWM) {
-					fl_lm3630a_percentageEx (1,p);
-				}
-			break;
-		case CM_FL_LM3630_TABLE:
-			if (2==gptHWCFG->m_val.bFL_PWM || 4==gptHWCFG->m_val.bFL_PWM) {
+		case CM_FRONT_LIGHT_TABLE:
+			if (4==gptHWCFG->m_val.bFrontLight_LED_Driver) {
 				fl_lm3630a_set_color (p);
 				printk ("[%s-%d] Select LM3630a Front light table %d\n",__func__,__LINE__,p);
 			}
-			else if(5==gptHWCFG->m_val.bFL_PWM) {
-				fl_lm3630a_set_colorEx (1,p);
-				printk ("[%s-%d] Select LM3630a2 Front light table %d\n",__func__,__LINE__,p);
-			}
 			break;
 
-		case CM_FL_HT68F20_GETDUTY:
+		case CM_FRONT_LIGHT_GETDUTY:
 			if(1==gptHWCFG->m_val.bFL_PWM)
 			{
 				int duty;
@@ -1699,10 +1297,10 @@ static int  ioctlDriver(struct file *filp, unsigned int command, unsigned long a
 			}
 			break;
 
-		case CM_FL_HT68F20_SETDUTY:
+		case CM_FRONT_LIGHT_HT68F20_SETDUTY:
 			if(0!=gptHWCFG->m_val.bFrontLight && 1==gptHWCFG->m_val.bFL_PWM)
 			{
-				fl_pwm_enable (FL_COLOR_FLAGS_W,1);
+				fl_pwm_enable (1);
 				if (p) {			
 					printk ("\nSet front light duty : %3d\n",p);
 					ht68f20_write_reg (0xA6, p&0xFF);
@@ -1710,15 +1308,17 @@ static int  ioctlDriver(struct file *filp, unsigned int command, unsigned long a
 					if (0 == last_FL_duty){
 						ht68f20_write_reg (0xA3, 0x01);
 
-						fl_pwr_enable(FL_COLOR_FLAGS_W,1,0);
+						msleep(100);
+						gpio_direction_output(MX6SL_FL_EN,giFL_ON);
 					}
 				}
 				else {
 					printk ("turn off front light\n");
 					ht68f20_write_reg (0xA3, 0);
 
-					FL_module_off(FL_COLOR_FLAGS_W);
+					FL_module_off();
 				}
+				last_FL_duty = p;
 			}
 			break;
 
@@ -1729,35 +1329,58 @@ static int  ioctlDriver(struct file *filp, unsigned int command, unsigned long a
 			}
 			break;
 
-		case CM_FL_MSP430_R_DUTY:
-			if( (0!=gptHWCFG->m_val.bFrontLight) && (4==gptHWCFG->m_val.bFL_PWM) )
-			{
-				printk ("\nSet front light R PWMCNT : 0x%4X\n",p);
-				printk ("Current front light Frequency : (8MHz/%5d)\n",current_FL_freq);
-				
-				msp430_fl_set_duty(MSP430_FL_IDX_R,p);
-
-			}
-			break;
-
-		case CM_FL_MSP430_W_DUTY:
+		case CM_FRONT_LIGHT_DUTY:
 			if(0!=gptHWCFG->m_val.bFrontLight)
 			{
-				printk ("\nSet front light W PWMCNT : 0x%4X\n",p);
-				printk ("Current front light Frequency : (8MHz/%5d)\n",current_FL_freq);
+				if (p) {			
+					int iChk;
+					printk ("\nSet front light PWMCNT : 0x%4X\n",p);
+					printk ("Current front light Frequency : (8MHz/0x%4X)\n",current_FL_freq);
 
-				msp430_fl_set_duty(MSP430_FL_IDX_W,p);
+					iChk = up_cmd_lock(__LINE__);
+					if(iChk<0) {
+						printk("[warning] %s(%d) skipped errorno(%d) \n",__FUNCTION__,__LINE__,iChk);
+						return -EIO;
+					}
+
+					up_write_reg (0xA7, p&0xFF00);
+					up_write_reg (0xA6, p<<8);
+					up_cmd_unlock();
+
+					if (0 == last_FL_duty){
+						msp430_fl_endtime(0xffff);// disable fl end time .
+						msp430_fl_enable (1);
+
+						msleep(100);
+						gpio_direction_output(MX6SL_FL_EN,giFL_ON);
+					}
+				}
+				else {
+					printk ("turn off front light\n");
+					msp430_fl_enable (0);
+					FL_module_off();
+				}
+				last_FL_duty = p;
 			}
 			break;
 
-		case CM_FL_MSP430_FREQUENCY:
+		case CM_FRONT_LIGHT_FREQUENCY:
 			if(0!=gptHWCFG->m_val.bFrontLight)
 			{
 				if (p) {
+					int iChk;
 
-					printk ("set front light Frequency : (8MHz/%5d)\n",p);		
-					msp430_fl_set_freq(MSP430_FL_IDX_W,p);	
+					printk ("set front light Frequency : (8MHz/0x%4X)\n",p);		
+					iChk = up_cmd_lock(__LINE__);
+					if(iChk<0) {
+						printk("[warning] %s(%d) skipped errorno(%d) \n",__FUNCTION__,__LINE__,iChk);
+						return -1;
+					}
+					
+					up_write_reg (0xA5, p&0xFF00);
+					up_write_reg (0xA4, (p<<8));
 					current_FL_freq = p;
+					up_cmd_unlock();
 				}
 			}
 			break;
@@ -1769,36 +1392,7 @@ static int  ioctlDriver(struct file *filp, unsigned int command, unsigned long a
 				gpio_direction_output(MX6SL_FL_R_EN, p);
 			}
 			break;
-		case CM_FL_MSP430_W_H_EN:
-			if(0!=gptHWCFG->m_val.bFrontLight)
-			{
-				printk ("set FL_W_H_EN : %d\n",p);		
-				gpio_request (MX6SL_FL_W_H_EN, "MX6SL_FL_W_H_EN");
-				mxc_iomux_v3_setup_pad(MX6SL_PAD_EPDC_SDCE3__GPIO_1_30);
-				gpio_direction_output(MX6SL_FL_W_H_EN, p);
-			}
-			break;
-		case CM_FL_MSP430_PWM_EN:
-			if(0!=gptHWCFG->m_val.bFrontLight)
-			{
-				if(p>0) {
-					msp430_fl_endtime(0xffff);// disable fl end time .
-					if(1==p) {
-						msp430_fl_enable (MSP430_FL_IDX_W,1);
-					}
-					else if(2==p) {
-						msp430_fl_enable (MSP430_FL_IDX_R,1);
-					}
-					else if(3==p){
-						msp430_fl_enable (MSP430_FL_IDX_ALL,1);
-					}
-				}
-				else {
-					printk ("turn off MSP430 PWM\n");
-					msp430_fl_enable (MSP430_FL_IDX_ALL,0);
-				}
-			}
-			break;
+
 		case CM_PLATFORM:
 			copy_to_user((void __user *)arg, &platform_type, 32);
 			break;
@@ -1858,11 +1452,6 @@ static int  ioctlDriver(struct file *filp, unsigned int command, unsigned long a
             i = gptHWCFG->m_val.bDisplayResolution;
             copy_to_user((void __user *)arg, &i, sizeof(unsigned long));
             break;
-		case CM_GET_WIFI:
-			printk("GET WIFI %d-------------------------\n",gptHWCFG->m_val.bWifi);
-			i = gptHWCFG->m_val.bWifi;
-            copy_to_user((void __user *)arg, &i, sizeof(unsigned long));
-			break;
 
 		default:
 			printk("pvi_io : do not get the command [%d]\n", command);
@@ -2009,39 +1598,32 @@ void ntx_led_current (unsigned int channel, unsigned char value)
 		ntx_led_dc (channel, 0);
 }
 
-static void FL_module_off(unsigned short wColorFlags) 
+static void FL_module_off(void) 
 {
-
-	//if(2==gptHWCFG->m_val.bFL_PWM) {
-		// Front light pwm is lm3630a no need trun on/off FL_EN anymore .
-		//return;
-	//}
-
-
-
-	if(wColorFlags&FL_COLOR_FLAGS_W) {
-		gpio_direction_input(gMX6SL_FL_W_H_EN);
+	if(4==gptHWCFG->m_val.bFrontLight_LED_Driver) {
+		// Front light LED driver is lm3630a no need trun on/off FL_EN anymore .
+		return;
 	}
-	fl_pwm_enable (wColorFlags,0);
-	fl_pwr_enable (wColorFlags,0,0);
+
+	if(giFL_ON) {
+		gpio_direction_output(MX6SL_FL_EN,0);
+	}
+	else {
+		gpio_direction_input(MX6SL_FL_EN);
+	}
+	gpio_direction_input(MX6SL_FL_R_EN);
+	fl_pwm_enable (0);
+	fl_pwr_enable (0);
 }
 
-void FL_W_off_func(struct work_struct *work)
+void FL_off_func(struct work_struct *work)
 {
-	printk("[%s-%d]FL W PWR off\n",__FUNCTION__,__LINE__);
-	FL_module_off(FL_COLOR_FLAGS_W);
-}
-void FL_R_off_func(struct work_struct *work)
-{
-	printk("[%s-%d]FL R PWR off\n",__FUNCTION__,__LINE__);
-	FL_module_off(FL_COLOR_FLAGS_R);
+	printk("[%s-%d]FL PWR off\n",__FUNCTION__,__LINE__);
+	FL_module_off();
 }
 
 int FL_suspend(void){
-	if(delayed_work_pending(&FL_W_off_work)){
-		return -1;
-	}	
-	if(delayed_work_pending(&FL_R_off_work)){
+	if(delayed_work_pending(&FL_off)){
 		return -1;
 	}	
 	return 0;
@@ -2279,13 +1861,6 @@ int ntx_is_bat_critical (void)
 	return (gpio_get_value(GPIO_BAT_LOW_INT))?0:1;
 }
 
-
-void ntx_fl_set_turnon_level(int iON_Lvl)
-{
-	giFL_ON = iON_Lvl;
-	//printk("%s(%d),%d\n",__FUNCTION__,iON_Lvl,giFL_ON);
-}
-
 static int gpio_initials(void)
 {
 	int irq, ret;
@@ -2329,15 +1904,18 @@ static int gpio_initials(void)
 
 	// MX6SL_FL_EN
 	if( 0 != gptHWCFG->m_val.bFrontLight ){
-
+		if(NTXHWCFG_TST_FLAG(gptHWCFG->m_val.bFrontLight_Flags,2)){
+			// FL_EN invert .
+			//printk("FL_EN inverted !\n",__FUNCTION__);
+			giFL_ON=1;
+		}
 		if( 0 == NTXHWCFG_TST_FLAG(gptHWCFG->m_val.bFrontLight_Flags,0)){
-			FL_module_off(FL_COLOR_FLAGS_ALL);
+			FL_module_off();
 		}
 		else {
-			fl_pwr_enable(FL_COLOR_FLAGS_W,1,0);
+			gpio_direction_output(MX6SL_FL_EN, giFL_ON);
 		}
-		INIT_DELAYED_WORK(&FL_W_off_work, FL_W_off_func);
-		INIT_DELAYED_WORK(&FL_R_off_work, FL_R_off_func);
+		INIT_DELAYED_WORK(&FL_off, FL_off_func);
 	}
 	
 #ifdef _WIFI_ALWAYS_ON_
@@ -2572,7 +2150,6 @@ static iomux_v3_cfg_t local_suspend_enter_pads[ARRAY_SIZE(ntx_suspend_enter_pads
 static iomux_v3_cfg_t ntx_suspend_exit_pads[ARRAY_SIZE(ntx_suspend_enter_pads)];
 
 
-extern int lm3630a_get_FL_current(void);
 
 extern int fl_level;		// If FL is on, value is 0-100. If FL is off, value is 0;
 extern int fl_current;		// Unit is 1uA. If FL is off, value is 0;
@@ -2583,7 +2160,6 @@ extern int hiber_current;	// Unit is 1uA.
 extern bool bat_alert_req_flg;	// 0:Normal, 1:Re-synchronize request from system
 void ricoh_suspend_state_sync(void)
 {
-	int iTemp;
 	const int fl_currentA[] = {
 		620  , 720  , 830  , 990  , 1120 , 1300 , 1460 , 1590 , 1750 , 2020 ,	// 01 ~ 10	
 		2330 , 2610 , 2900 , 3260 , 3570 , 3900 , 4100 , 4300 , 4510 , 6230 ,	// 11 ~ 20
@@ -2622,66 +2198,25 @@ void ricoh_suspend_state_sync(void)
 	};
 
 	fl_level = last_FL_duty;		// If FL is on, value is 0-100. If FL is off, value is 0;
-
-	fl_current = 0;
-	if (gptHWCFG->m_val.bFrontLight) {
-
+	if (last_FL_duty && gptHWCFG->m_val.bFrontLight) {
 		switch(gptHWCFG->m_val.bPCB) {
 		default :
-			if(2==gptHWCFG->m_val.bFL_PWM||4==gptHWCFG->m_val.bFL_PWM||
-				5==gptHWCFG->m_val.bFL_PWM||6==gptHWCFG->m_val.bFL_PWM||
-				7==gptHWCFG->m_val.bFL_PWM)
-			{
-				iTemp = lm3630a_get_FL_current();
-				if(iTemp>=0) {
-					fl_current = iTemp;
-				}
-				else {
-					printk(KERN_WARNING"\n[WARNING]FL current not avalible(PCB=0x%x)\n\n",
-							gptHWCFG->m_val.bPCB);
-				}
-				break;
-			}
-			else {
-				printk(KERN_WARNING"\n[WARNING]there is no FL current table for this model(0x%x)\n\n",
+			printk(KERN_WARNING"\n[WARNING]there is no FL current table for this model(0x%x)\n\n",
 					gptHWCFG->m_val.bPCB);
-			}
 		case 40://Q5X
-			if(2==gptHWCFG->m_val.bFL_PWM) {
-				// 11 colors temperature 2X FL
-				iTemp = lm3630a_get_FL_current();
-				if(iTemp>=0) 
-					fl_current = iTemp;
-				else 
-					printk(KERN_WARNING"\n[WARNING]Q52 2X FL current not avalible\n\n");
-			}
-			else {
-				if(last_FL_duty) {
-					fl_current = fl_current_Q5X[last_FL_duty-1]; 	// Unit is 1uA. If FL is off, value is 0;
-				}
-			}
+			fl_current = fl_current_Q5X[last_FL_duty-1]; 	// Unit is 1uA. If FL is off, value is 0;
 			break;
 		case 46:// Q9X
-			if(last_FL_duty) 
-				fl_current = fl_currentA[last_FL_duty-1];
+			fl_current = fl_currentA[last_FL_duty-1];
 			break;
 		case 50://QFX
-			if(2==gptHWCFG->m_val.bFL_PWM) {
-				// 11 colors temperature 2X FL
-				iTemp = lm3630a_get_FL_current();
-				if(iTemp>=0) 
-					fl_current = iTemp;
-				else 
-					printk(KERN_WARNING"\n[WARNING]QF2 2X FL current not avalible\n\n");
-			}
-			else {
-				if(last_FL_duty) 
-					fl_current = fl_current_QFX[last_FL_duty-1];
-			}
+			fl_current = fl_current_QFX[last_FL_duty-1];
 			break;
 		}
 	}
-
+	else {
+		fl_current = 0;
+	}
 	slp_state = gSleep_Mode_Suspend?1:0;		// 0:Suspend, 1:Hibernate
 
 	switch (gptHWCFG->m_val.bPCB) {
@@ -2695,11 +2230,6 @@ void ricoh_suspend_state_sync(void)
 	case 50://QFX
 		sus_current = 1700;
 		hiber_current = 700;
-		break;
-	case 58://E60QJX
-		idle_current = 16500;
-		sus_current = 3000;
-		hiber_current = 1900;
 		break;
 	}
 	bat_alert_req_flg = 0;	// 0:Normal, 1:Re-synchronize request from system
@@ -2720,7 +2250,7 @@ void ntx_gpio_suspend (void)
 	gpiofn_suspend();
 
 	if (!gSleep_Mode_Suspend && (50 == gptHWCFG->m_val.bPCB) && (0 == last_FL_duty)) {
-		FL_module_off (FL_COLOR_FLAGS_ALL);
+		FL_module_off ();
 		mxc_iomux_v3_setup_pad(MX6SL_PAD_I2C1_SCL__GPIO_3_12);
 		mxc_iomux_v3_setup_pad(MX6SL_PAD_I2C1_SDA__GPIO_3_13);
 		gpio_request (IMX_GPIO_NR(3, 12), "MX6SL_i2c1_SCL");
@@ -2913,11 +2443,7 @@ void ntx_gpio_suspend (void)
 					*p |= ((u64)0x0001b0b1 << MUX_PAD_CTRL_SHIFT);
 				}
 			}
-			else if( ((*p) == MX6SL_PAD_EPDC_PWRCTRL3__GPIO_2_10 && \
-					(IMX_GPIO_NR(2,10)==gMX6SL_FL_PWR_EN)) || \
-				 	((*p) == MX6SL_PAD_KEY_ROW2__GPIO_3_29 && \
-					(IMX_GPIO_NR(3,29)==gMX6SL_FL_PWR_EN)) )
-			{
+			else if( (*p) == MX6SL_PAD_EPDC_PWRCTRL3__GPIO_2_10) {
 
 				if(0==giFL_ON) {
 					// open drain
@@ -2925,7 +2451,7 @@ void ntx_gpio_suspend (void)
 					*p |= ((u64)0x000108b0 << MUX_PAD_CTRL_SHIFT);
 				}
 				else
-					gpio_direction_output(gMX6SL_FL_PWR_EN, 0);
+					gpio_direction_output(MX6SL_FL_EN, 0);
 			}
 			else {
 				if((36==gptHWCFG->m_val.bPCB||40==gptHWCFG->m_val.bPCB) && 
@@ -2982,14 +2508,8 @@ void ntx_gpio_suspend (void)
 
 		if(giFL_ON) {
 			// set as output .
-			if(IMX_GPIO_NR(2,10)==gMX6SL_FL_PWR_EN) {
-				dwDisableBit = (unsigned long)(1<<10); // GP 2_10
-				ntx_gpio_insuspend_dir[1] &= ~dwDisableBit; 
-			}
-			if(IMX_GPIO_NR(3,29)==gMX6SL_FL_PWR_EN) {
-				dwDisableBit = (unsigned long)(1<<29); // GP 3_29
-				ntx_gpio_insuspend_dir[2] &= ~dwDisableBit; 
-			}
+			dwDisableBit = (unsigned long)(1<<10);
+			ntx_gpio_insuspend_dir[1] &= ~dwDisableBit; //GP2_10
 		}
 
 		if(36==gptHWCFG->m_val.bPCB || 40==gptHWCFG->m_val.bPCB) {
@@ -3143,15 +2663,14 @@ void ntx_gpio_resume (void)
 			fp9928_ONOFF(1);
 		}
 		//gpio_direction_output (MX6SL_EP_PWRALL, 1);
-		if(2==gptHWCFG->m_val.bFL_PWM || 4==gptHWCFG->m_val.bFL_PWM || 5==gptHWCFG->m_val.bFL_PWM) {
-			// Front light pwm is lm3630a.
-			//fl_pwr_enable(FL_COLOR_FLAGS_ALL,1,0);
-			fl_pwr_force_enable(2);
+		if(4==gptHWCFG->m_val.bFrontLight_LED_Driver) {
+			// Front light LED driver is lm3630a.
+			gpio_direction_output(MX6SL_FL_EN,giFL_ON);
 		}
 	}
 
 	if (!gSleep_Mode_Suspend && (50 == gptHWCFG->m_val.bPCB) && (0 == last_FL_duty)) {
-		FL_module_off (FL_COLOR_FLAGS_ALL);
+		FL_module_off ();
 		gpio_free (IMX_GPIO_NR(3, 12));
 		mxc_iomux_v3_setup_pad (MX6SL_PAD_I2C1_SCL__I2C1_SCL);
 		mxc_iomux_v3_setup_pad (MX6SL_PAD_I2C1_SDA__I2C1_SDA);
@@ -3160,9 +2679,9 @@ void ntx_gpio_resume (void)
 	gpiofn_resume();
 
 	if(36==gptHWCFG->m_val.bPCB || 40==gptHWCFG->m_val.bPCB ||
-		 50==gptHWCFG->m_val.bPCB||58==gptHWCFG->m_val.bPCB) 
+		 50==gptHWCFG->m_val.bPCB) 
 	{
-    // E60Q3X/E60Q5X/E60QFX/E60QJX
+    // E60Q3X/E60Q5X/E60QFX
 		if(mxc_usb_plug_getstatus()) {
 			led_red(1);
 		}

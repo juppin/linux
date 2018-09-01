@@ -42,8 +42,6 @@ struct ricoh61x_rtc {
 	bool		irq_en;
 };
 
-volatile int giRicoh61x_rtc_user_enabled = 0;
-
 static int ricoh61x_read_regs(struct device *dev, int reg, int len,
 	uint8_t *val)
 {
@@ -358,7 +356,6 @@ static int ricoh61x_rtc_alarm_enable(struct device *dev, unsigned int enabled)
 		if (err < 0)
 			dev_err(dev->parent, "PMU: %s write rtc_ctrl1 error 0x%lx\n", __func__, err);
 	}
-	giRicoh61x_rtc_user_enabled = enabled;
 
 ERR:
 	return err;

@@ -72,7 +72,6 @@
 #include <linux/usbplugevent.h>
 #include <linux/mmc/sdhci.h>
 
-#include <linux/byteorder/generic.h>
 
 #include "usb.h"
 #include "devices-imx6q.h"
@@ -83,9 +82,6 @@
 
 #include "ntx_hwconfig.h"
 
-#include "ntx_firmware_parser.h"
-#include "ntx_firmware.h"
-
 #include <linux/mfd/ricoh619.h>
 #include <linux/rtc/rtc-ricoh619.h>
 #include <linux/power/ricoh619_battery.h>
@@ -94,9 +90,6 @@
 #include "../../../drivers/input/keyboard/gpiofn.h"
 #define TOUCH_HOME_LED		1
 #include "../../../drivers/misc/ntx-misc.h"
-#include "../../../drivers/video/backlight/lm3630a_bl_tables.h"
-#include <linux/wlan_plat.h>
-
 
 
 #define GDEBUG 0
@@ -125,8 +118,6 @@ volatile unsigned gMX6SL_WIFI_3V3 = IMX_GPIO_NR(5, 0);	/* SD2_DAT7 */
 volatile unsigned gMX6SL_WIFI_RST = IMX_GPIO_NR(4, 27);	/* SD2_RST */
 volatile unsigned gMX6SL_WIFI_INT = IMX_GPIO_NR(4, 29);	/* SD2_DAT6 */
 volatile unsigned gMX6SL_HOME_LED = IMX_GPIO_NR(5, 10);	/* SD2_DAT6 */
-volatile unsigned gMX6SL_FL_W_H_EN = MX6SL_FL_R_EN; /* EPDC_SCE2 */
-volatile unsigned gMX6SL_FL_PWR_EN = MX6SL_FL_EN; 
 
 volatile int giISD_3V3_ON_Ctrl = -1;
 
@@ -139,8 +130,6 @@ extern char *pu_reg_id;
 extern int __init mx6sl_ntx_init_pfuze100(u32 int_gpio);
 extern void tle4913_init(void);
 
-extern void fl_pwr_force_enable (int isEnable);
-extern void ntx_fl_set_turnon_level(int iON_Lvl);
 static int csi_enabled;
 
 #define _MYINIT_DATA	
@@ -203,134 +192,14 @@ static int _MYINIT_TEXT boot_port_setup(char *str)
 	return 1;
 }
 
-
-volatile static unsigned char _MYINIT_DATA *gpbNTXFW_paddr;
-volatile unsigned long _MYINIT_DATA gdwNTXFW_size;
-volatile NTX_FIRMWARE_HDR *gptNTXFW;
-
-
-static int ntxfw_item_proc(
-		NTX_FIRMWARE_HDR *I_ptFWHdr,
-		NTX_FIRMWARE_ITEM_HDR *I_ptFWItemHdr,
-		void *I_pvFWItemBin,int I_iItemIdx)
-{
-	int iRet = 0;
-	static NTX_FW_LM3630FL_RGBW_current_tab_hdr *gptLm3630fl_RGBW_curr_tab_hdr = 0;
-
-	if(!gptHWCFG) {
-		return -1;
-	}
-
-	if(I_ptFWItemHdr->dw12345678!=0x12345678) {
-		printk(KERN_WARNING"ntxfw format error !\n");
-		return -2;
-	}
-
-	printk("ntxfw[%d],\"%s\",type=0x%x,sz=%d\n",I_iItemIdx,
-			I_ptFWItemHdr->szFirmwareName,
-			I_ptFWItemHdr->wFirmwareType,
-			(int)I_ptFWItemHdr->dwFirmwareSize);
-
-	if( 2==gptHWCFG->m_val.bFL_PWM||4==gptHWCFG->m_val.bFL_PWM||
-			5==gptHWCFG->m_val.bFL_PWM||6==gptHWCFG->m_val.bFL_PWM||
-			7==gptHWCFG->m_val.bFL_PWM) 
-	{
-		// models with lm3630 .
-		if(NTX_FW_TYPE_LM3630_FLPERCTTAB==I_ptFWItemHdr->wFirmwareType) {
-			NTX_FW_LM3630FL_percent_tab *ptLm3630fl_percent_tab = I_pvFWItemBin;
-			printk("lm3630fl percent table,color=%d\n",ptLm3630fl_percent_tab->bColor);
-
-			if(1==gptHWCFG->m_val.bFrontLight) {
-				// TABLE0 .
-				lm3630a_set_FL_W_duty_table(gptHWCFG->m_val.bFrontLight,
-					100,ptLm3630fl_percent_tab->bPercentBrightnessA);
-				lm3630a_set_default_power_by_table(gptHWCFG->m_val.bFrontLight,
-					ptLm3630fl_percent_tab->bDefaultCurrent);
-			}
-		}
-		else if(NTX_FW_TYPE_LM3630_FLCURTABLE==I_ptFWItemHdr->wFirmwareType) {
-			NTX_FW_LM3630FL_current_tab *ptLm3630fl_ricohcurr_tab = I_pvFWItemBin;
-			printk("lm3630fl ricoh current table,color=%d\n",ptLm3630fl_ricohcurr_tab->bColor);
-
-			if(5==gptHWCFG->m_val.bFL_PWM) {
-				// RGBW FL .
-				if(NTX_FW_FL_COLOR_WHITE==ptLm3630fl_ricohcurr_tab->bColor) {
-					lm3630a_set_FL_RicohCurrTab(1,1,ptLm3630fl_ricohcurr_tab->dwCurrentA,255);
-				}
-				else 
-				if(NTX_FW_FL_COLOR_RED==ptLm3630fl_ricohcurr_tab->bColor) {
-					lm3630a_set_FL_RicohCurrTab(1,0,ptLm3630fl_ricohcurr_tab->dwCurrentA,255);
-				}
-				else 
-				if(NTX_FW_FL_COLOR_GREEN==ptLm3630fl_ricohcurr_tab->bColor) {
-					lm3630a_set_FL_RicohCurrTab(0,1,ptLm3630fl_ricohcurr_tab->dwCurrentA,255);
-				}
-				else 
-				if(NTX_FW_FL_COLOR_BLUE==ptLm3630fl_ricohcurr_tab->bColor) {
-					lm3630a_set_FL_RicohCurrTab(0,0,ptLm3630fl_ricohcurr_tab->dwCurrentA,255);
-				}
-			}
-			
-		}
-		else if(NTX_FW_TYPE_LM3630_RGBW_CURTAB_HDR==I_ptFWItemHdr->wFirmwareType) {
-			gptLm3630fl_RGBW_curr_tab_hdr = I_pvFWItemBin;
-			printk("lm3630fl RGBW curr table:%d items\n",(int)gptLm3630fl_RGBW_curr_tab_hdr->dwTotalItems);
-		}
-		else if(NTX_FW_TYPE_LM3630_RGBW_CURTAB==I_ptFWItemHdr->wFirmwareType) {
-			NTX_FW_LM3630FL_RGBW_current_item *L_ptLm3630fl_RGBW_cur_tab = I_pvFWItemBin;
-			if(gptLm3630fl_RGBW_curr_tab_hdr) {
-				lm3630a_set_FL_RGBW_RicohCurrTab(gptLm3630fl_RGBW_curr_tab_hdr->dwTotalItems,L_ptLm3630fl_RGBW_cur_tab);
-			}
-			else {
-				printk(KERN_ERR"[Warning] LM3630FL RGBW curr table header not exist !!\n");
-			}
-		}
-		else if(NTX_FW_TYPE_LM3630_MIX2COLOR11_CURTAB==I_ptFWItemHdr->wFirmwareType) {
-			NTX_FW_LM3630FL_MIX2COLOR11_current_tab *L_ptLm3630fl_Mix2Color11_curr_tab = I_pvFWItemBin;
-			lm3630a_set_FL_Mix2color11_RicohCurrTab(L_ptLm3630fl_Mix2Color11_curr_tab);
-		}
-		else {
-		}
-	}
-
-	return iRet;
-}
-
-
-static int _MYINIT_TEXT ntxfw_p_setup(char *str)
-{
-	gpbNTXFW_paddr = (unsigned char *)simple_strtoul(str,NULL,0);
-	gptNTXFW = (NTX_FIRMWARE_HDR *)_MemoryRequest((void *)gpbNTXFW_paddr, gdwNTXFW_size, "ntxfw_p");
-
-	if(ntx_firmware_parse_fw_buf(gptNTXFW,gdwNTXFW_size,ntxfw_item_proc)<0) {
-		gpbNTXFW_paddr = 0;
-		gptNTXFW = 0;
-		gdwNTXFW_size = 0;
-		return 0;
-	}
-	else {
-		printk("%s() ntxfw_p=%p,vaddr=%p,size=%d,name=\"%s\",items=%d\n",__FUNCTION__,
-			gpbNTXFW_paddr,gptNTXFW,gdwNTXFW_size,gptNTXFW->szFirmwareName,(int)gptNTXFW->wFirmwareItems);
-		return 1;
-	}
-
-}
-static int _MYINIT_TEXT ntxfw_size_setup(char *str)
-{
-	gdwNTXFW_size = (unsigned long)simple_strtoul(str,NULL,0);
-	printk("%s() ntxfw_szie=%d\n",__FUNCTION__,(int)gdwNTXFW_size);
-	return 1;
-}
-
-
 static void _parse_cmdline(void)
 {
 	static int iParseCnt = 0;
 	char *pcPatternStart,*pcPatternVal,*pcPatternValEnd,cTempStore;
 	unsigned long ulPatternLen;
 
-	char *szParsePatternA[]={"hwcfg_sz=","hwcfg_p=","boot_port=","ntxfw_sz=","ntxfw_p="};
-	int ((*pfnDispatchA[])(char *str))={hwcfg_size_setup,hwcfg_p_setup,boot_port_setup,ntxfw_size_setup,ntxfw_p_setup};
+	char *szParsePatternA[]={"hwcfg_sz=","hwcfg_p=","boot_port="};
+	int ((*pfnDispatchA[])(char *str))={hwcfg_size_setup,hwcfg_p_setup,boot_port_setup };
 		
 	int i;
 	char *pszCmdLineBuf;
@@ -1057,11 +926,6 @@ static struct i2c_board_info i2c_lm3630a_bl_binfo = {
 	 .addr = 0x36,
 	 .platform_data = &lm3630a_data,
 };
-static struct i2c_board_info i2c_lm3630a_bl_binfo2 = {
-	 .type = LM3630A_NAME,
-	 .addr = 0x38,
-	 .platform_data = &lm3630a_data,
-};
 
 int ricoh619_init_port(int irq_num) 
 {
@@ -1639,39 +1503,6 @@ static void epdc_disable_pins(void)
 }
 
 #if 1 //[
-static struct fb_videomode ed060sct_mode = {
-.name = "E60SCT",
-.refresh = 85,
-.xres = 800,
-.yres = 600,
-.pixclock = 26680000,
-.left_margin = 8,
-.right_margin = 96,
-.upper_margin = 4,
-.lower_margin = 13,
-.hsync_len = 4,
-.vsync_len = 1,
-.sync = 0,
-.vmode = FB_VMODE_NONINTERLACED,
-.flag = 0,
-};
-
-static struct fb_videomode ed060scq_mode = {
-.name = "E60SCQ",
-.refresh = 85,
-.xres = 800,
-.yres = 600,
-.pixclock = 25000000,
-.left_margin = 8,
-.right_margin = 60,
-.upper_margin = 4,
-.lower_margin = 10,
-.hsync_len = 8,
-.vsync_len = 4,
-.sync = 0,
-.vmode = FB_VMODE_NONINTERLACED,
-.flag = 0,
-};
 
 static struct fb_videomode ed060sc8_mode = {
 .name = "E60SC8",
@@ -1835,41 +1666,6 @@ static struct fb_videomode peng060d_mode = {
 .flag=0,
 };
 
-static struct fb_videomode ef133ut1sce_mode = {
-.name="EF133UT1SCE",
-.refresh=65,
-.xres=1600,
-.yres=1200,
-.pixclock=72222223,
-.left_margin=8,
-.right_margin=97,
-.upper_margin=4,
-.lower_margin=7,
-.hsync_len=12,
-.vsync_len=1,
-.sync=0,
-.vmode=FB_VMODE_NONINTERLACED,
-.flag=0,
-};
-
-static struct fb_videomode ed078kh1_mode = {
-.name = "ED078KH1",
-.refresh=85,
-.xres=1872,
-.yres=1404,
-.pixclock=160000000,
-.left_margin=44,
-.right_margin=310,
-.upper_margin=4,
-.lower_margin=5,
-.hsync_len=44,
-.vsync_len=1,
-.sync=0,
-.vmode=FB_VMODE_NONINTERLACED,
-.flag=0,
-};
-
-
 
 
 static struct imx_epdc_fb_mode panel_modes[] = {
@@ -2005,59 +1801,7 @@ static struct imx_epdc_fb_mode panel_modes[] = {
 225,        /* gdclk_offs */
 3,            /* num_ce */
 },
-{
-&ef133ut1sce_mode,
-4,      /* vscan_holdoff */
-10,     /* sdoed_width */
-20,     /* sdoed_delay */
-10,     /* sdoez_width */
-20,     /* sdoez_delay */
-743,    /* GDCLK_HP */
-475,    /* GDSP_OFF */
-0,      /* GDOE_OFF */
-15,     /* gdclk_offs */
-1,      /* num_ce */
-},
-{
-&ed060scq_mode,
-4,      /* vscan_holdoff */
-10,     /* sdoed_width */
-20,     /* sdoed_delay */
-10,     /* sdoez_width */
-20,     /* sdoez_delay */
-438,    /* GDCLK_HP */
-263,    /* GDSP_OFF */
-0,      /* GDOE_OFF */
-23,     /* gdclk_offs */
-3,      /* num_ce */
-},
-{
-&ed078kh1_mode,
-4,      /* vscan_holdoff */
-10,     /* sdoed_width */
-20,     /* sdoed_delay */
-10,     /* sdoez_width */
-20,     /* sdoez_delay */
-926,    /* GDCLK_HP */
-899,    /* GDSP_OFF */
-0,      /* GDOE_OFF */
-230,     /* gdclk_offs */
-1,      /* num_ce */
-},
 
-{
-&ed060sct_mode,
-4,      /* vscan_holdoff */
-10,     /* sdoed_width */
-20,     /* sdoed_delay */
-10,     /* sdoez_width */
-20,     /* sdoez_delay */
-372,    /* GDCLK_HP */
-367,    /* GDSP_OFF */
-0,      /* GDOE_OFF */
-111,     /* gdclk_offs */
-1,      /* num_ce */
-},
 };
  
 
@@ -2667,16 +2411,6 @@ static struct gpio_keys_button gpio_key_HOME[] = {
 #endif //] CONFIG_ANDROID
 	GPIO_BUTTON(IMX_GPIO_NR(5, 8), KEY_POWER, 1, "power", 1, 1),
 };
-static struct gpio_keys_button gpio_key_HOME_ROW0[] = {
-#ifdef CONFIG_ANDROID//[
-	GPIO_BUTTON(GPIO_KB_ROW0, KEY_HOME, 1, "home", 1,1),			// home
-#else //][!CONFIG_ANDROID
-	GPIO_BUTTON(GPIO_KB_ROW0, 61, 1, "home", 1, 50),			// home
-#endif //] CONFIG_ANDROID
-//#ifdef CONFIG_ANDROID //[
-	GPIO_BUTTON(IMX_GPIO_NR(5, 8), KEY_POWER, 1, "power", 1, 1),
-//#endif //]CONFIG_ANDROID
-};
 
 static struct gpio_keys_button gpio_key_FL[] = {
 	GPIO_BUTTON(GPIO_KB_COL1, 90, 1, "front_light", 1, 10),			// Front light
@@ -2700,20 +2434,6 @@ static struct platform_device ntx_gpio_key_device = {
 	.dev		= {
 		.platform_data = &ntx_gpio_key_data,
 	}
-};
-
-
-int _ntx_wifi_power_ctrl (int isWifiEnable);
-static struct wifi_platform_data ntx_wifi_control= {
-	.set_power = _ntx_wifi_power_ctrl,
-};
-
-static struct platform_device ntx_wifi_device = {
-        .name           = "bcmdhd_wlan",
-        .id             = 1,
-        .dev            = {
-                .platform_data = &ntx_wifi_control,
-        },
 };
 
 #ifdef TOUCH_HOME_LED//[
@@ -3367,10 +3087,6 @@ static const struct pm_platform_data mx6sl_ntx_pm_data __initconst = {
 	.suspend_exit = ntx_suspend_exit,
 };
 
-void ntx_wacom_reset(bool on) {
-	gpio_direction_output (MX6SL_WACOM_RST, on);
-}
-
 int ntx_check_suspend (void)
 {
 	return gpio_get_value(gMX6SL_IR_TOUCH_INT)?0:1;
@@ -3419,23 +3135,20 @@ static void ntx_gpio_init(void)
 		gMX6SL_IR_TOUCH_RST = IMX_GPIO_NR(5, 9);	
 		gMX6SL_HALL_EN = IMX_GPIO_NR(5, 12);	
 		gMX6SL_CHG_LED = IMX_GPIO_NR(5, 10);	
-		if(50==gptHWCFG->m_val.bPCB||58==gptHWCFG->m_val.bPCB)
+		if(50==gptHWCFG->m_val.bPCB)
 		{
-			// E60QFX/E60QJX .
+			// E60QFX .
 			 
 			// ON_LED# pull high .
 			mxc_iomux_v3_setup_pad(MX6SL_PAD_SD1_DAT2__GPIO_5_13_PULLHIGH);
 
-			gMX6SL_ACT_LED = IMX_GPIO_NR(5, 7);
-			gMX6SL_ON_LED = IMX_GPIO_NR(5, 13);
-			gMX6SL_CHG_LED = IMX_GPIO_NR(5, 13);
+			gMX6SL_ACT_LED = IMX_GPIO_NR(5, 7);	
+			gMX6SL_ON_LED = IMX_GPIO_NR(5, 13);	
 		}
 		else {
 			gMX6SL_ACT_LED = IMX_GPIO_NR(5, 7);	
 			gMX6SL_ON_LED = IMX_GPIO_NR(5, 7);	
 		}
-
-
 
  		gMX6SL_WIFI_3V3 = IMX_GPIO_NR(4, 29);
  		gMX6SL_WIFI_RST = IMX_GPIO_NR(5, 0);
@@ -3460,6 +3173,7 @@ static void ntx_gpio_init(void)
 			}
 			else if(50==gptHWCFG->m_val.bPCB) {
 				// E60QFX 
+				gMX6SL_CHG_LED = IMX_GPIO_NR(5, 13);	
 				gpio_request (IMX_GPIO_NR(3, 31), "MX6SL_KL25_INT2");
 				gpio_direction_input (IMX_GPIO_NR(3, 31));
 				i2c_kl25_binfo.irq = gpio_to_irq(IMX_GPIO_NR(3, 31));
@@ -3488,7 +3202,7 @@ static void ntx_gpio_init(void)
 		gpio_direction_output (GPIO_IR_3V3_ON, 1);
 		//gpio_request (GPIO_EP_3V3_ON, "EP_3V3_ON");
 		//gpio_direction_output (GPIO_EP_3V3_ON, 1);
-		
+
 	 	if(42==gptHWCFG->m_val.bPCB) {
 			// Wacom GPIOs
 			gpio_request (MX6SL_WACOM_INT, "MX6SL_WACOM_INT");
@@ -3498,7 +3212,7 @@ static void ntx_gpio_init(void)
 			gpio_request (MX6SL_WACOM_FWE, "MX6SL_WACOM_FWE");
 			gpio_direction_output (MX6SL_WACOM_FWE, 0);
 			gpio_request (MX6SL_WACOM_RST, "MX6SL_WACOM_RST");
-			ntx_wacom_reset(0);
+			gpio_direction_output (MX6SL_WACOM_RST, 1);
 		}
 	}
 
@@ -3540,7 +3254,7 @@ static void ntx_gpio_init(void)
     // E60Q3X/E60Q5X
 		gpio_request (gMX6SL_HOME_LED, "MX6SL_HOME_LED");
 	}
-	else if(50==gptHWCFG->m_val.bPCB||58==gptHWCFG->m_val.bPCB) {
+	else if(50==gptHWCFG->m_val.bPCB) {
 		// ON_LED==CHG_LED .
 	}
 	else {
@@ -3556,7 +3270,7 @@ static void ntx_gpio_init(void)
 	
 	gpio_request (gMX6SL_MSP_INT, "MX6SL_MSP_INT");
 	gpio_direction_input (gMX6SL_MSP_INT);
-
+	
 	//#ifndef CONFIG_ANDROID //[
 	if(0==gptHWCFG->m_val.bUIStyle) {
 		gpio_request (gMX6SL_PWR_SW, "MX6SL_PWR_SW");
@@ -3587,14 +3301,6 @@ static void ntx_gpio_init(void)
 	gpio_request (MX6SL_FL_R_EN, "MX6SL_FL_R_EN");
 	gpio_direction_input (MX6SL_FL_R_EN);
 
-	if(4==gptHWCFG->m_val.bFL_PWM||5==gptHWCFG->m_val.bFL_PWM) 
-	{
-		// FL PWM source is MSP430+LM3630 .
-		gpio_request (MX6SL_FL_W_H_EN, "MX6SL_FL_W_H_EN");
-		mxc_iomux_v3_setup_pad(MX6SL_PAD_EPDC_SDCE3__GPIO_1_30);
-		gMX6SL_FL_W_H_EN = MX6SL_FL_W_H_EN; // front light high level enable gpio .
-		gMX6SL_FL_PWR_EN = MX6SL_FL_PWR_ON; // front light high level enable gpio .
-	}
 #if 0	//[
 	gpio_request (MX6SL_EP_PWRALL, "MX6SL_EP_PWRALL" );
 	gpio_request (MX6SL_EP_WAKEUP	, "MX6SL_EP_WAKEUP" );
@@ -3609,11 +3315,6 @@ static void ntx_gpio_init(void)
 	gpio_direction_input (MX6SL_EP_INT);
 	gpio_direction_input (MX6SL_EP_PWRSTAT);
 #endif //]
-	if(NTXHWCFG_TST_FLAG(gptHWCFG->m_val.bFrontLight_Flags,2)){
-		// FL_EN invert .
-		//printk("FL_EN inverted !\n",__FUNCTION__);
-		ntx_fl_set_turnon_level(1);
-	}
 
 }
 
@@ -3681,6 +3382,7 @@ static void __init mx6_ntx_init(void)
 	}
 	else if (3==gptHWCFG->m_val.bTouchType) {
 		// C touch type .
+//Terry add:Disable Touch
 		i2c_register_board_info(0,&i2c_elan_touch_binfo,1);
 	}
 	else {
@@ -3689,26 +3391,6 @@ static void __init mx6_ntx_init(void)
 
 	if(1==gptHWCFG->m_val.bPMIC){
 		// RC5T619 .
-		
-		if (4==gptHWCFG->m_val.bRamType) {
-			// LPDDR3/DDR3 .
-			
-			// Core4_1V2 .
-			pdata_dc4_0.regulator.constraints.always_on = 0;
-			pdata_dc4_0.regulator.constraints.boot_on = 0;
-			pdata_dc4_0.init_enable = 0;
-			pdata_dc4_0.init_apply = 1;
-			// Core5_1V2
-			pdata_ldo3_0.regulator.constraints.always_on = 0;
-			pdata_ldo3_0.regulator.constraints.boot_on = 0;
-			pdata_ldo3_0.init_enable = 0;
-			pdata_ldo3_0.init_apply = 1;
-			// DDR_0V6
-			pdata_ldo6_0.regulator.constraints.always_on = 0;
-			pdata_ldo6_0.regulator.constraints.boot_on = 0;
-			pdata_ldo6_0.init_enable = 0;
-			pdata_ldo6_0.init_apply = 1;
-		}
 		if(!NTXHWCFG_TST_FLAG(gptHWCFG->m_val.bPCB_Flags,4)) {
 			// Panel is designed for low voltage .
 			printk("ldo8_1v8 ouput 3v3\n");
@@ -3727,30 +3409,6 @@ static void __init mx6_ntx_init(void)
 			pdata_dc5_0.sleep_uV = 1700*1000;	// core4_1v8
 			pdata_ldo2_0.sleep_uV = 3100*1000;	// core1_3v3
 		}
-		if(0==gptHWCFG->m_val.bFrontLight) {
-			// FL_3V3 disabled .
-			pdata_ldo7_0.regulator.constraints.always_on = 0;
-			pdata_ldo7_0.regulator.constraints.boot_on = 0;
-			pdata_ldo7_0.init_enable = 0;
-			pdata_ldo7_0.init_apply = 1;
-		}
-
-		if (58==gptHWCFG->m_val.bPCB || 61==gptHWCFG->m_val.bPCB) {
-			// E60QJX/E60QKX .
-
-			// LDO_1V8 not used .
-			pdata_ldo8_0.regulator.constraints.always_on = 0;
-			pdata_ldo8_0.regulator.constraints.boot_on = 0;
-			pdata_ldo8_0.init_enable = 0;
-			pdata_ldo8_0.init_apply = 1;
-			pdata_dc2_0.sleep_uV = 2800*1000;	// core3_3v3
-			pdata_ldo2_0.sleep_uV = 2800*1000;	// core1_3v3 (VDD_SNVS_IN)
-
-			if (58==gptHWCFG->m_val.bPCB) { // E60QJx
-				ricoh_battery_data.alarm_vol_mv = 3100;		// set battery critical to 3.1mV
-				ricoh_battery_data.type[0].fg_poff_vbat = 3400;		// set battery 0% to 3.4V
-			}
-		}
 		if (50==gptHWCFG->m_val.bPCB)
 			pdata_ldo7_0.init_enable = 1;
 
@@ -3767,8 +3425,8 @@ static void __init mx6_ntx_init(void)
 		i2c_register_board_info(2,&i2c_sysmp_ricoh619_binfo,1);
 	//	platform_device_register(&ricoh_device_rtc);
 		pm_power_off = ricoh619_power_off;
-		if (40==gptHWCFG->m_val.bPCB || 50==gptHWCFG->m_val.bPCB || 58==gptHWCFG->m_val.bPCB) {
-			// I2C3 set 400kHz for E60Q5x & E60QFx for faster suspending .
+		if (40==gptHWCFG->m_val.bPCB || 50==gptHWCFG->m_val.bPCB) {
+			// set 400kHz for E60Q5x & E60QFx
 			mx6_ntx_i2c2_data.bitrate = 400000;
 		}
 	}
@@ -3788,36 +3446,24 @@ static void __init mx6_ntx_init(void)
 		// RTC use MSP430
 		platform_device_register(&ntx_device_rtc);
 	}
-
 	
-
-		if(1==gptHWCFG->m_val.bFL_PWM){
-			// Front light PWM source is ht68f20
-			i2c_register_board_info(0,&i2c_ht68f20_binfo,1);
-		}
-		else if(4==gptHWCFG->m_val.bFL_PWM || 5==gptHWCFG->m_val.bFL_PWM) 
-		{
-			// Front light PWM source is MSP430+LM3630 .
-			mxc_iomux_v3_setup_pad(MX6SL_PAD_KEY_ROW2__GPIO_3_29_OUTPUT);
-			gpio_request(MX6SL_FL_PWR_ON, "FL_pwr");
-			fl_pwr_force_enable(2);
-			i2c_register_board_info(1,&i2c_lm3630a_bl_binfo,1);
-			if(5==gptHWCFG->m_val.bFL_PWM) {
-				i2c_register_board_info(1,&i2c_lm3630a_bl_binfo2,1);
-			}
-		}
-		else if (2==gptHWCFG->m_val.bFL_PWM||6==gptHWCFG->m_val.bFL_PWM||7==gptHWCFG->m_val.bFL_PWM) {
-				// Front light PWM is lm3630a
-			fl_pwr_force_enable(2);
+	if(1==gptHWCFG->m_val.bFL_PWM){
+		// Front light PWM source is ht68f20
+		i2c_register_board_info(0,&i2c_ht68f20_binfo,1);
+	}
+	else {
+		if(4==gptHWCFG->m_val.bFrontLight_LED_Driver) {
+			// Front light LED drive is lm3630a
+			gpio_direction_output (MX6SL_FL_EN, 1);
 			i2c_register_board_info(0,&i2c_lm3630a_bl_binfo,1);
 		}
-	
+	}
 
 	if(3==gptHWCFG->m_val.bRSensor) {
 		// g-sensor with microP KL25
 		i2c_register_board_info(0,&i2c_kl25_binfo,1);
 	}
-	
+
 	if(42==gptHWCFG->m_val.bPCB) 
 	{
 		i2c_register_board_info(1,&i2c_wacom_binfo,1);
@@ -3896,8 +3542,7 @@ static void __init mx6_ntx_init(void)
 
 			// ESD is boot device .
 			printk("add usdhc %d as mmcblk0\n",giBootPort+1);
-			if(50==gptHWCFG->m_val.bPCB||
-				58==gptHWCFG->m_val.bPCB)
+			if(50==gptHWCFG->m_val.bPCB)
 			{
 				//
 				imx6q_add_sdhci_usdhc_imx(giBootPort, &mx6_ntx_esd_nocd_data);
@@ -3980,39 +3625,25 @@ static void __init mx6_ntx_init(void)
 			break;*/
 		default:
 		      switch(gptHWCFG->m_val.bKeyPad) { //key pad define through bKeyPad in hwconfig
-		        case 12: // NO_Key
-		          ntx_gpio_key_data.buttons = gpio_key_None;
-		          ntx_gpio_key_data.nbuttons = ARRAY_SIZE(gpio_key_None);
-							break;
 		        case 11: // FL_Key
 		          ntx_gpio_key_data.buttons = gpio_key_FL;
 		          ntx_gpio_key_data.nbuttons = ARRAY_SIZE(gpio_key_FL);
 		          break;
-						case 16: // FL+HOME PAD
+				case 16: // FL+HOME PAD
 		        case 13: // FL+HOME KEY
 							if(50==gptHWCFG->m_val.bPCB) {
 								// E60QFX
-		          	ntx_gpio_key_data.buttons = gpio_key_HOME_FL2;
-		          	ntx_gpio_key_data.nbuttons = ARRAY_SIZE(gpio_key_HOME_FL2);
+		          			ntx_gpio_key_data.buttons = gpio_key_HOME_FL2;
+		          			ntx_gpio_key_data.nbuttons = ARRAY_SIZE(gpio_key_HOME_FL2);
 							}
 							else {
-		          	ntx_gpio_key_data.buttons = gpio_key_HOME_FL;
-		          	ntx_gpio_key_data.nbuttons = ARRAY_SIZE(gpio_key_HOME_FL);
+		          			ntx_gpio_key_data.buttons = gpio_key_HOME_FL;
+		          			ntx_gpio_key_data.nbuttons = ARRAY_SIZE(gpio_key_HOME_FL);
 							}
 		          break;
 		        case 14: // HOME
 		          ntx_gpio_key_data.buttons = gpio_key_HOME;
 		          ntx_gpio_key_data.nbuttons = ARRAY_SIZE(gpio_key_HOME);
-			case 18: // HOMEPAD
-							if(58==gptHWCFG->m_val.bPCB) {
-								//E60QJX .
-		          	ntx_gpio_key_data.buttons = gpio_key_HOME_ROW0;
-		          	ntx_gpio_key_data.nbuttons = ARRAY_SIZE(gpio_key_HOME_ROW0);
-							}
-							else {
-		          	ntx_gpio_key_data.buttons = gpio_key_HOME;
-		          	ntx_gpio_key_data.nbuttons = ARRAY_SIZE(gpio_key_HOME);
-							}
 		          break;
 		        default: // FL+HOME
 		          ntx_gpio_key_data.buttons = gpio_key_HOME_FL;
@@ -4115,9 +3746,12 @@ static void __init mx6_ntx_init(void)
 	else {
 		printk(KERN_ERR "missing ntx hwconfig !!\n");
 	}
-	printk("[%s %d]===================\n",__func__, __LINE__);
-	//Terry add: for rtl8189es wifi
-	platform_device_register(&ntx_wifi_device);
+#if 0 //disable Debug GPIO
+gpio_request(IMX_GPIO_NR(4, 5), "DBG_TXD");
+	gpio_direction_output(IMX_GPIO_NR(4, 5), 1);
+    gpio_request(IMX_GPIO_NR(4, 4), "DBG_RXD");
+    gpio_direction_output(IMX_GPIO_NR(4, 4), 1);
+#endif
 
 }
 
