@@ -1990,7 +1990,10 @@ static __init int asrc_init(void)
 	asrc_pcm_p2p_ops_asrc.asrc_p2p_release_pair = asrc_release_pair;
 	asrc_pcm_p2p_ops_asrc.asrc_p2p_finish_conv = asrc_finish_conv;
 
+#if 0//[ 2013/08/08 gallen remove for compile error !
+
 	asrc_p2p_hook(&asrc_pcm_p2p_ops_asrc);
+#endif //]
 
 	ret = platform_driver_register(&mxc_asrc_driver);
 	return ret;

@@ -94,10 +94,12 @@
 #define MX6Q_SABRELITE_CSI0_RST		IMX_GPIO_NR(1, 8)
 #define MX6Q_SABRELITE_CSI0_PWN		IMX_GPIO_NR(1, 6)
 
+#ifdef CONFIG_MX6_ENET_IRQ_TO_GPIO
 #define MX6_ENET_IRQ		IMX_GPIO_NR(1, 6)
 #define IOMUX_OBSRV_MUX1_OFFSET	0x3c
 #define OBSRV_MUX1_MASK			0x3f
 #define OBSRV_MUX1_ENET_IRQ		0x9
+#endif
 
 #define MX6Q_SABRELITE_SD3_WP_PADCFG	(PAD_CTL_PKE | PAD_CTL_PUE |	\
 		PAD_CTL_PUS_22K_UP | PAD_CTL_SPEED_MED |	\
@@ -109,7 +111,6 @@ static struct clk *sata_clk;
 extern char *gp_reg_id;
 extern char *soc_reg_id;
 extern char *pu_reg_id;
-extern bool enet_to_gpio_6;
 static int caam_enabled;
 
 extern struct regulator *(*get_cpu_regulator)(void);
@@ -216,8 +217,8 @@ static iomux_v3_cfg_t mx6q_sabrelite_pads[] = {
 	MX6Q_PAD_EIM_D28__I2C1_SDA,	/* GPIO3[28] */
 
 	/* I2C2 Camera, MIPI */
-	MX6Q_PAD_KEY_COL3__I2C2_SCL,    /* GPIO4[12] */
-	MX6Q_PAD_KEY_ROW3__I2C2_SDA,    /* GPIO4[13] */
+	MX6Q_PAD_KEY_COL3__I2C2_SCL,	/* GPIO4[12] */
+	MX6Q_PAD_KEY_ROW3__I2C2_SDA,	/* GPIO4[13] */
 
 	/* I2C3 */
 	MX6Q_PAD_GPIO_5__I2C3_SCL,	/* GPIO1[5] - J7 - Display card */
@@ -328,6 +329,9 @@ static iomux_v3_cfg_t mx6q_sabrelite_csi0_sensor_pads[] = {
 	MX6Q_PAD_CSI0_MCLK__IPU1_CSI0_HSYNC,
 	MX6Q_PAD_CSI0_PIXCLK__IPU1_CSI0_PIXCLK,
 	MX6Q_PAD_CSI0_VSYNC__IPU1_CSI0_VSYNC,
+#ifndef CONFIG_MX6_ENET_IRQ_TO_GPIO
+	MX6Q_PAD_GPIO_6__GPIO_1_6,		/* J5 - Camera GP */
+#endif
 	MX6Q_PAD_GPIO_8__GPIO_1_8,		/* J5 - Camera Reset */
 	MX6Q_PAD_SD1_DAT0__GPIO_1_16,		/* J5 - Camera GP */
 	MX6Q_PAD_NANDF_D5__GPIO_2_5,		/* J16 - MIPI GP */
@@ -473,7 +477,9 @@ static int mx6q_sabrelite_fec_phy_init(struct phy_device *phydev)
 static struct fec_platform_data fec_data __initdata = {
 	.init = mx6q_sabrelite_fec_phy_init,
 	.phy = PHY_INTERFACE_MODE_RGMII,
+#ifdef CONFIG_MX6_ENET_IRQ_TO_GPIO
 	.gpio_irq = MX6_ENET_IRQ,
+#endif
 };
 
 static int mx6q_sabrelite_spi_cs[] = {
@@ -677,6 +683,7 @@ static void __init imx6q_sabrelite_init_usb(void)
 	mxc_iomux_set_gpr_register(1, 13, 1, 1);
 
 	mx6_set_otghost_vbus_func(imx6q_sabrelite_usbotg_vbus);
+	mx6_usb_dr_init();
 }
 
 /* HW Initialization, if return 0, initialization is successful. */
@@ -799,7 +806,7 @@ static struct ipuv3_fb_platform_data sabrelite_fb_data[] = {
 	.disp_dev = "ldb",
 	.interface_pix_fmt = IPU_PIX_FMT_RGB666,
 	.mode_str = "LDB-XGA",
-	.default_bpp = 16,
+	.default_bpp = 32,
 	.int_clk = false,
 	}, {
 	.disp_dev = "lcd",
@@ -905,7 +912,7 @@ static struct ion_platform_data imx_ion_data = {
 		{
 		.type = ION_HEAP_TYPE_CARVEOUT,
 		.name = "vpu_ion",
-		.size = SZ_16M,
+		.size = SZ_64M,
 		},
 	},
 };
@@ -1162,13 +1169,6 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
 					pdata_fb[i++].res_size[0] = memparse(str, &str);
 				}
 			}
-			/* GPU reserved memory */
-			str = t->u.cmdline.cmdline;
-			str = strstr(str, "gpumem=");
-			if (str != NULL) {
-				str += 7;
-				imx6q_gpu_pdata.reserved_mem_size = memparse(str, &str);
-			}
 			break;
 		}
 	}
@@ -1182,26 +1182,6 @@ static struct mipi_csi2_platform_data mipi_csi2_pdata = {
 	.dphy_clk = "mipi_pllref_clk",
 	.pixel_clk = "emi_clk",
 };
-
-#ifdef CONFIG_ANDROID_RAM_CONSOLE
-static struct resource ram_console_resource = {
-	.name = "android ram console",
-	.flags = IORESOURCE_MEM,
-};
-
-static struct platform_device android_ram_console = {
-	.name = "ram_console",
-	.num_resources = 1,
-	.resource = &ram_console_resource,
-};
-
-static int __init imx6x_add_ram_console(void)
-{
-	return platform_device_register(&android_ram_console);
-}
-#else
-#define imx6x_add_ram_console() do {} while (0)
-#endif
 
 static int __init caam_setup(char *__unused)
 {
@@ -1224,17 +1204,6 @@ static void __init mx6_sabrelite_board_init(void)
 
 	mxc_iomux_v3_setup_multiple_pads(mx6q_sabrelite_pads,
 					ARRAY_SIZE(mx6q_sabrelite_pads));
-
-	if (enet_to_gpio_6) {
-		iomux_v3_cfg_t enet_gpio_pad =
-			MX6Q_PAD_GPIO_6__ENET_IRQ_TO_GPIO_6;
-		mxc_iomux_v3_setup_pad(enet_gpio_pad);
-	} else {
-		/* J5 - Camera GP */
-		iomux_v3_cfg_t camera_gpio_pad =
-			MX6Q_PAD_GPIO_6__GPIO_1_6;
-		mxc_iomux_v3_setup_pad(camera_gpio_pad);
-	}
 
 #ifdef CONFIG_FEC_1588
 	/* Set GPIO_16 input for IEEE-1588 ts_clk and RMII reference clock
@@ -1296,15 +1265,6 @@ static void __init mx6_sabrelite_board_init(void)
 	imx6q_add_mxc_hdmi(&hdmi_data);
 
 	imx6q_add_anatop_thermal_imx(1, &mx6q_sabrelite_anatop_thermal_data);
-	if (enet_to_gpio_6)
-		/* Make sure the IOMUX_OBSRV_MUX1 is set to ENET_IRQ. */
-		mxc_iomux_set_specialbits_register(
-			IOMUX_OBSRV_MUX1_OFFSET,
-			OBSRV_MUX1_ENET_IRQ,
-			OBSRV_MUX1_MASK);
-	else
-		fec_data.gpio_irq = -1;
-
 	imx6_init_fec(fec_data);
 #ifdef CONFIG_MX6_ENET_IRQ_TO_GPIO
 	/* Make sure the IOMUX_OBSRV_MUX1 is set to ENET_IRQ. */
@@ -1404,16 +1364,8 @@ static void __init mx6q_sabrelite_reserve(void)
 {
 	phys_addr_t phys;
 	int i;
-
-#ifdef CONFIG_ANDROID_RAM_CONSOLE
-	phys = memblock_alloc_base(SZ_1M, SZ_4K, SZ_1G);
-	memblock_remove(phys, SZ_1M);
-	memblock_free(phys, SZ_1M);
-	ram_console_resource.start = phys;
-	ram_console_resource.end   = phys + SZ_1M - 1;
-#endif
-
 #if defined(CONFIG_MXC_GPU_VIV) || defined(CONFIG_MXC_GPU_VIV_MODULE)
+
 	if (imx6q_gpu_pdata.reserved_mem_size) {
 		phys = memblock_alloc_base(imx6q_gpu_pdata.reserved_mem_size,
 					   SZ_4K, SZ_1G);

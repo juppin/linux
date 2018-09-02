@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*    Copyright (C) 2005 - 2013 by Vivante Corp.
+*    Copyright (C) 2005 - 2012 by Vivante Corp.
 *
 *    This program is free software; you can redistribute it and/or modify
 *    it under the terms of the GNU General Public License as published by
@@ -17,6 +17,8 @@
 *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 *
 *****************************************************************************/
+
+
 
 
 #ifndef __gc_hal_options_h_
@@ -46,20 +48,11 @@
         This define enables the profiler.
 */
 #ifndef VIVANTE_PROFILER
-#   define VIVANTE_PROFILER                     1
+#   define VIVANTE_PROFILER                     0
 #endif
 
 #ifndef VIVANTE_PROFILER_PERDRAW
 #   define  VIVANTE_PROFILER_PERDRAW    0
-#endif
-
-/*
-    VIVANTE_PROFILER_CONTEXT
-
-        This define enables the profiler according to each hw context.
-*/
-#ifndef VIVANTE_PROFILER_CONTEXT
-#   define VIVANTE_PROFILER_CONTEXT             1
 #endif
 
 /*
@@ -121,30 +114,6 @@
         The version of the command buffer and task manager.
 */
 #define COMMAND_PROCESSOR_VERSION               1
-
-/*
-    gcdDUMP_KEY
-
-        Set this to a string that appears in 'cat /proc/<pid>/cmdline'. E.g. 'camera'.
-        HAL will create dumps for the processes matching this key.
-*/
-#ifndef gcdDUMP_KEY
-#   define gcdDUMP_KEY                          "process"
-#endif
-
-/*
-    gcdDUMP_PATH
-
-        The dump file location. Some processes cannot write to the sdcard.
-        Try apps' data dir, e.g. /data/data/com.android.launcher
-*/
-#ifndef gcdDUMP_PATH
-#if defined(ANDROID)
-#   define gcdDUMP_PATH                         "/mnt/sdcard/"
-#else
-#   define gcdDUMP_PATH                         "./"
-#endif
-#endif
 
 /*
     gcdDUMP
@@ -375,17 +344,6 @@
 #endif
 
 /*
-    gcdUSER_HEAP_ALLOCATOR
-
-        Set to 1 to enable user mode heap allocator for fast memory allocation
-        and destroying. Otherwise, memory allocation/destroying in user mode
-        will be directly managed by system. Only for linux for now.
-*/
-#ifndef gcdUSER_HEAP_ALLOCATOR
-#   define gcdUSER_HEAP_ALLOCATOR               1
-#endif
-
-/*
     gcdHEAP_SIZE
 
         Set the allocation size for the internal heaps.  Each time a heap is
@@ -397,6 +355,15 @@
 */
 #ifndef gcdHEAP_SIZE
 #   define gcdHEAP_SIZE                         (64 << 10)
+#endif
+
+/*
+    gcdPOWER_MANAGEMENT
+
+        This define enables the power management code.
+*/
+#ifndef gcdPOWER_MANAGEMENT
+#   define gcdPOWER_MANAGEMENT                  1
 #endif
 
 /*
@@ -428,7 +395,7 @@
         If the value is 0, no timeout will be checked for.
 */
 #ifndef gcdGPU_TIMEOUT
-#if gcdFPGA_BUILD
+#   if gcdFPGA_BUILD
 #       define gcdGPU_TIMEOUT                   0
 #   else
 #       define gcdGPU_TIMEOUT                   20000
@@ -694,7 +661,7 @@
         This define enables the recovery code.
 */
 #ifndef gcdENABLE_RECOVERY
-#   define gcdENABLE_RECOVERY                   0
+#   define gcdENABLE_RECOVERY                   1
 #endif
 
 /*
@@ -726,10 +693,28 @@
 
         Support swap with a specific rectangle.
 
-        Set the rectangle with eglSetSwapRectangleVIV api.
+        Set the rectangle with eglSetSwapRectangleANDROID api.
 */
 #ifndef gcdSUPPORT_SWAP_RECTANGLE
 #   define gcdSUPPORT_SWAP_RECTANGLE            0
+#endif
+
+/*
+    gcdDEFER_RESOLVES
+
+        Support deferred resolves for 3D apps.
+*/
+#ifndef gcdDEFER_RESOLVES
+#   define gcdDEFER_RESOLVES                    0
+#endif
+
+/*
+    gcdCOPYBLT_OPTIMIZATION
+
+        Combine dirty areas resulting from Android's copyBlt.
+*/
+#ifndef gcdCOPYBLT_OPTIMIZATION
+#   define gcdCOPYBLT_OPTIMIZATION              0
 #endif
 
 /*
@@ -738,24 +723,7 @@
         Use linear buffer for GPU apps so HWC can do 2D composition.
 */
 #ifndef gcdGPU_LINEAR_BUFFER_ENABLED
-#   define gcdGPU_LINEAR_BUFFER_ENABLED         1
-#endif
-
-/*
-    gcdENABLE_RENDER_INTO_WINDOW
-
-        Enable Render-Into-Window (ie, No-Resolve) feature on android.
-        NOTE that even if enabled, it still depends on hardware feature and
-        android application behavior. When hardware feature or application
-        behavior can not support render into window mode, it will fail back
-        to normal mode.
-        When Render-Into-Window is finally used, window back buffer of android
-        applications will be allocated matching render target tiling format.
-        Otherwise buffer tiling is decided by the above option
-        'gcdGPU_LINEAR_BUFFER_ENABLED'.
-*/
-#ifndef gcdENABLE_RENDER_INTO_WINDOW
-#   define gcdENABLE_RENDER_INTO_WINDOW         1
+#   define gcdGPU_LINEAR_BUFFER_ENABLED         0
 #endif
 
 /*
@@ -784,15 +752,7 @@
 #endif
 
 #ifndef gcdANDROID_UNALIGNED_LINEAR_COMPOSITION_ADJUST
-#   ifdef ANDROID
-#      define  gcdANDROID_UNALIGNED_LINEAR_COMPOSITION_ADJUST    1
-#   else
-#      define  gcdANDROID_UNALIGNED_LINEAR_COMPOSITION_ADJUST    0
-#   endif
-#endif
-
-#ifndef gcdENABLE_PE_DITHER_FIX
-#   define gcdENABLE_PE_DITHER_FIX              1
+#   define  gcdANDROID_UNALIGNED_LINEAR_COMPOSITION_ADJUST    0
 #endif
 
 #ifndef gcdSHARED_PAGETABLE
@@ -828,10 +788,6 @@
 
 #ifndef gcdDISALBE_EARLY_EARLY_Z
 #   define gcdDISALBE_EARLY_EARLY_Z             1
-#endif
-
-#ifndef gcdSHADER_SRC_BY_MACHINECODE
-#   define gcdSHADER_SRC_BY_MACHINECODE         1
 #endif
 
 /*
@@ -881,67 +837,6 @@
 
 #ifndef gcdUSE_NPOT_PATCH
 #define gcdUSE_NPOT_PATCH                       1
-#endif
-
-#ifndef gcdSYNC
-#   define gcdSYNC                              1
-#endif
-
-#ifndef gcdENABLE_SPECIAL_HINT3
-#   define gcdENABLE_SPECIAL_HINT3               1
-#endif
-
-#if defined(ANDROID)
-#ifndef gcdPRE_ROTATION
-#   define gcdPRE_ROTATION                      1
-#endif
-#endif
-
-/*
-    gcdDVFS
-
-        When non-zero, software will make use of dynamic voltage and
-        frequency feature.
- */
-#ifndef gcdDVFS
-#   define gcdDVFS                               0
-#   define gcdDVFS_ANAYLSE_WINDOW                4
-#   define gcdDVFS_POLLING_TIME                  (gcdDVFS_ANAYLSE_WINDOW * 4)
-#endif
-
-/*
-    gcdANDROID_NATIVE_FENCE_SYNC
-
-        Enable android native fence sync. It is introduced since jellybean-4.2.
-        Depends on linux kernel option: CONFIG_SYNC.
-
-        0: Disabled
-        1: Build framework for native fence sync feature, and EGL extension
-        2: Enable async swap buffers for client
-           * Native fence sync for client 'queueBuffer' in EGL, which is
-             'acquireFenceFd' for layer in compositor side.
-        3. Enable async hwcomposer composition.
-           * 'releaseFenceFd' for layer in compositor side, which is native
-             fence sync when client 'dequeueBuffer'
-           * Native fence sync for compositor 'queueBuffer' in EGL, which is
-             'acquireFenceFd' for framebuffer target for DC
- */
-#ifndef gcdANDROID_NATIVE_FENCE_SYNC
-#   define gcdANDROID_NATIVE_FENCE_SYNC        0
-#endif
-
-#ifndef gcdFORCE_MIPMAP
-#   define gcdFORCE_MIPMAP                     0
-#endif
-
-/*
-    gcdFORCE_GAL_LOAD_TWICE
-
-        When non-zero, each thread except the main one will load libGAL.so twice to avoid potential segmetantion fault when app using dlopen/dlclose.
-        If threads exit arbitrarily, libGAL.so may not unload until the process quit.
- */
-#ifndef gcdFORCE_GAL_LOAD_TWICE
-#   define gcdFORCE_GAL_LOAD_TWICE             0
 #endif
 
 #endif /* __gc_hal_options_h_ */

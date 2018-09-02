@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*    Copyright (C) 2005 - 2013 by Vivante Corp.
+*    Copyright (C) 2005 - 2012 by Vivante Corp.
 *
 *    This program is free software; you can redistribute it and/or modify
 *    it under the terms of the GNU General Public License as published by
@@ -17,6 +17,9 @@
 *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 *
 *****************************************************************************/
+
+
+
 
 
 #include "gc_hal.h"
@@ -181,8 +184,7 @@ _FlushPipe(
                 ?   ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 3:3) - (0 ? 3:3) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 3:3) - (0 ? 3:3) + 1))))))) << (0 ? 3:3))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 3:3) - (0 ? 3:3) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 3:3) - (0 ? 3:3) + 1))))))) << (0 ? 3:3)))
                 :   ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0)))
                   | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1)))
-                  | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 2:2) - (0 ? 2:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 2:2) - (0 ? 2:2) + 1))))))) << (0 ? 2:2))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 2:2) - (0 ? 2:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 2:2) - (0 ? 2:2) + 1))))))) << (0 ? 2:2)))
-                  | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 4:4) - (0 ? 4:4) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 4:4) - (0 ? 4:4) + 1))))))) << (0 ? 4:4))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 4:4) - (0 ? 4:4) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 4:4) - (0 ? 4:4) + 1))))))) << (0 ? 4:4)));
+                  | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 2:2) - (0 ? 2:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 2:2) - (0 ? 2:2) + 1))))))) << (0 ? 2:2))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 2:2) - (0 ? 2:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 2:2) - (0 ? 2:2) + 1))))))) << (0 ? 2:2)));
 
         /* Semaphore from FE to PE. */
         *buffer++
@@ -436,7 +438,6 @@ _InitializeContextBuffer(
     gctUINT i;
     gctUINT vertexUniforms, fragmentUniforms;
     gctUINT fe2vsCount;
-    gctBOOL halti0;
 #endif
 
     /* Reset the buffer index. */
@@ -458,7 +459,6 @@ _InitializeContextBuffer(
 #if !defined(VIVANTE_NO_3D)
     /**************************************************************************/
     /* Build 3D states. *******************************************************/
-    halti0 = (((((gctUINT32) (Context->hardware->identity.chipMinorFeatures1)) >> (0 ? 23:23)) & ((gctUINT32) ((((1 ? 23:23) - (0 ? 23:23) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 23:23) - (0 ? 23:23) + 1)))))) );
 
     /* Query shader support. */
     gcmkVERIFY_OK(gckHARDWARE_QueryShaderCaps(
@@ -474,7 +474,7 @@ _InitializeContextBuffer(
     index += _SwitchPipe(Context, index, gcvPIPE_3D);
 
     /* Current context pointer. */
-#if gcdDEBUG
+#if gcdDEBUG && 1
     index += _State(Context, index, 0x03850 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
 #endif
 
@@ -623,10 +623,7 @@ _InitializeContextBuffer(
         index += _State(Context, index, 0x10180 >> 2, 0x00000000, 32, gcvFALSE, gcvFALSE);
         index += _State(Context, index, 0x10200 >> 2, 0x00000000, 32, gcvFALSE, gcvFALSE);
         index += _State(Context, index, 0x10280 >> 2, 0x00000000, 32, gcvFALSE, gcvFALSE);
-        for (i = 0; i < 256 / 16; i += 1)
-        {
-            index += _State(Context, index, (0x02C00 >> 2) + i * 16, 0x00000000, 14, gcvFALSE, gcvFALSE);
-        }
+        index += _State(Context, index, 0x02C00 >> 2, 0x00000000, 256, gcvFALSE, gcvFALSE);
         index += _State(Context, index, 0x10300 >> 2, 0x00000000, 32, gcvFALSE, gcvFALSE);
         index += _State(Context, index, 0x10380 >> 2, 0x00321000, 32, gcvFALSE, gcvFALSE);
         index += _State(Context, index, 0x10400 >> 2, 0x00000000, 32, gcvFALSE, gcvFALSE);
@@ -749,8 +746,6 @@ _InitializeContextBuffer(
 
     if (Context->hardware->identity.pixelPipes == 1)
     {
-        index += _State(Context, index, 0x01460 >> 2, 0x00000000, 8, gcvFALSE, gcvTRUE);
-
         index += _State(Context, index, 0x01430 >> 2, 0x00000000, 1, gcvFALSE, gcvTRUE);
         index += _State(Context, index, 0x01410 >> 2, 0x00000000, 1, gcvFALSE, gcvTRUE);
     }
@@ -758,15 +753,12 @@ _InitializeContextBuffer(
     {
         index += _State(Context, index, (0x01460 >> 2) + (0 << 3), 0x00000000, Context->hardware->identity.pixelPipes, gcvFALSE, gcvTRUE);
 
+        index += _State(Context, index, (0x01480 >> 2) + (0 << 3), 0x00000000, Context->hardware->identity.pixelPipes, gcvFALSE, gcvTRUE);
+
         for (i = 0; i < 2; i++)
         {
             index += _State(Context, index, (0x01500 >> 2) + (i << 3), 0x00000000, Context->hardware->identity.pixelPipes, gcvFALSE, gcvTRUE);
         }
-    }
-
-    if (Context->hardware->identity.pixelPipes > 1 || halti0)
-    {
-        index += _State(Context, index, (0x01480 >> 2) + (0 << 3), 0x00000000, Context->hardware->identity.pixelPipes, gcvFALSE, gcvTRUE);
     }
 
     /* Resolve states. */
@@ -1265,11 +1257,11 @@ gckCONTEXT_Construct(
             }
 
             /* Copy the current context. */
-            gckOS_MemCopy(
+            gcmkONERROR(gckOS_MemCopy(
                 tempContext->logical,
                 currContext->logical,
                 context->totalSize
-                );
+                ));
 
             /* Get the next context buffer. */
             tempContext = tempContext->next;
@@ -1450,7 +1442,7 @@ gckCONTEXT_Update(
             gcmkONERROR(gckKERNEL_OpenUserData(
                 kernel, needCopy,
                 Context->recordArray,
-                gcmUINT64_TO_PTR(kDelta->recordArray), Context->recordArraySize,
+                kDelta->recordArray, Context->recordArraySize,
                 (gctPOINTER *) &recordArray
                 ));
 
@@ -1559,13 +1551,13 @@ gckCONTEXT_Update(
             gcmkASSERT(kDelta->refCount >= 0);
 
             /* Get the next state delta. */
-            nDelta = gcmUINT64_TO_PTR(kDelta->next);
+            nDelta = kDelta->next;
 
             /* Get access to the state records. */
             gcmkONERROR(gckKERNEL_CloseUserData(
                 kernel, needCopy,
                 gcvFALSE,
-                gcmUINT64_TO_PTR(kDelta->recordArray), Context->recordArraySize,
+                kDelta->recordArray, Context->recordArraySize,
                 (gctPOINTER *) &recordArray
                 ));
 
@@ -1712,7 +1704,7 @@ OnError:
         gcmkVERIFY_OK(gckKERNEL_CloseUserData(
             kernel, needCopy,
             gcvFALSE,
-            gcmUINT64_TO_PTR(kDelta->recordArray), Context->recordArraySize,
+            kDelta->recordArray, Context->recordArraySize,
             (gctPOINTER *) &recordArray
             ));
 	}

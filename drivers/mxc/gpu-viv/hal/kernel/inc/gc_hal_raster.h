@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*    Copyright (C) 2005 - 2013 by Vivante Corp.
+*    Copyright (C) 2005 - 2012 by Vivante Corp.
 *
 *    This program is free software; you can redistribute it and/or modify
 *    it under the terms of the GNU General Public License as published by
@@ -17,6 +17,8 @@
 *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 *
 *****************************************************************************/
+
+
 
 
 #ifndef __gc_hal_raster_h_
@@ -568,23 +570,6 @@ gco2D_MonoBlit(
 	IN gceSURF_FORMAT DestFormat
 	);
 
-gceSTATUS
-gco2D_MonoBlitEx(
-    IN gco2D        Engine,
-    IN gctPOINTER   StreamBits,
-    IN gctINT32     StreamStride,
-    IN gctINT32     StreamWidth,
-    IN gctINT32     StreamHeight,
-    IN gctINT32     StreamX,
-    IN gctINT32     StreamY,
-    IN gctUINT32    FgColor,
-    IN gctUINT32    BgColor,
-    IN gcsRECT_PTR  SrcRect,
-    IN gcsRECT_PTR  DstRect,
-    IN gctUINT8     FgRop,
-    IN gctUINT8     BgRop
-    );
-
 /* Set kernel size. */
 gceSTATUS
 gco2D_SetKernelSize(
@@ -959,15 +944,6 @@ gco2D_SetSourceTileStatus(
     );
 
 gceSTATUS
-gco2D_SetTargetTileStatus(
-    IN gco2D Engine,
-    IN gce2D_TILE_STATUS_CONFIG TileStatusConfig,
-    IN gceSURF_FORMAT CompressedFormat,
-    IN gctUINT32 ClearValue,
-    IN gctUINT32 GpuAddress
-    );
-
-gceSTATUS
 gco2D_QueryU32(
     IN gco2D Engine,
     IN gce2D_QUERY Item,
@@ -979,28 +955,6 @@ gco2D_SetStateU32(
     IN gco2D Engine,
     IN gce2D_STATE State,
     IN gctUINT32 Value
-    );
-
-gceSTATUS
-gco2D_SetStateArrayI32(
-    IN gco2D Engine,
-    IN gce2D_STATE State,
-    IN gctINT32_PTR Array,
-    IN gctINT32 ArraySize
-    );
-
-gceSTATUS
-gco2D_SetStateArrayU32(
-    IN gco2D Engine,
-    IN gce2D_STATE State,
-    IN gctUINT32_PTR Array,
-    IN gctINT32 ArraySize
-    );
-
-gceSTATUS
-gco2D_SetTargetRect(
-    IN gco2D Engine,
-    IN gcsRECT_PTR Rect
     );
 
 #ifdef __cplusplus

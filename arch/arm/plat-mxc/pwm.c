@@ -20,6 +20,7 @@
 #include <linux/fsl_devices.h>
 #include <mach/hardware.h>
 
+
 /* i.MX1 and i.MX21 share the same PWM function block: */
 
 #define MX1_PWMC    0x00   /* PWM Control Register */
@@ -47,7 +48,6 @@
 #define MX3_PWMCR_DBGEN			(1 << 22)
 #define MX3_PWMCR_CLKSRC_IPG		(1 << 16)
 #define MX3_PWMCR_CLKSRC_IPG_32k	(3 << 16)
-#define MX3_PWMCR_OUTPIN_DISCONNECT	(3 << 18)
 
 struct pwm_device {
 	struct list_head	node;
@@ -65,20 +65,6 @@ struct pwm_device {
 	void (*enable_pwm_pad)(void);
 	void (*disable_pwm_pad)(void);
 };
-
-void pwm_out_enable(struct pwm_device *pwm, int enable)
-{
-    u32 cr = 0;
-
-    cr = readl(pwm->mmio_base + MX3_PWMCR);
-	if (enable)
-		cr &= ~(MX3_PWMCR_OUTPIN_DISCONNECT);
-	else
-		cr |= (MX3_PWMCR_OUTPIN_DISCONNECT);
-
-	writel(cr, pwm->mmio_base + MX3_PWMCR);
-}
-EXPORT_SYMBOL(pwm_out_enable);
 
 int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns)
 {
@@ -153,6 +139,7 @@ int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns)
 	} else {
 		BUG();
 	}
+
 	return 0;
 }
 EXPORT_SYMBOL(pwm_config);

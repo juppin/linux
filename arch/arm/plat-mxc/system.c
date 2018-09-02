@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 ARM Limited
  * Copyright (C) 2000 Deep Blue Solutions Ltd
- * Copyright 2006-2014 Freescale Semiconductor, Inc.
+ * Copyright 2006-2012 Freescale Semiconductor, Inc.
  * Copyright 2008 Juergen Beisert, kernel@pengutronix.de
  * Copyright 2009 Ilya Yanok, Emcraft Systems Ltd, yanok@emcraft.com
  *
@@ -35,8 +35,6 @@
 static void __iomem *wdog_base;
 extern u32 enable_ldo_mode;
 
-extern int dvfs_core_is_active;
-extern void stop_dvfs(void);
 
 static void arch_reset_special_mode(char mode, const char *cmd)
 {
@@ -59,21 +57,19 @@ void arch_reset(char mode, const char *cmd)
 
 #ifdef CONFIG_ARCH_MX6
 	/* wait for reset to assert... */
-	if (enable_ldo_mode == LDO_MODE_BYPASSED && !(machine_is_mx6sl_evk()
-		|| machine_is_mx6sl_arm2())) {
+	if (enable_ldo_mode == LDO_MODE_BYPASSED) {
 		/*On Sabresd board use WDOG2 to reset external PMIC, so here do
 		* more WDOG2 reset.*/
 		wcr_enable = 0x14;
 		__raw_writew(wcr_enable, IO_ADDRESS(MX6Q_WDOG2_BASE_ADDR));
 		__raw_writew(wcr_enable, IO_ADDRESS(MX6Q_WDOG2_BASE_ADDR));
-	} else {
+	} else
 		wcr_enable = (1 << 2);
-		__raw_writew(wcr_enable, wdog_base);
-		/* errata TKT039676, SRS bit may be missed when
-		SRC sample it, need to write the wdog controller
-		twice to avoid it */
-		__raw_writew(wcr_enable, wdog_base);
-	}
+	__raw_writew(wcr_enable, wdog_base);
+	/* errata TKT039676, SRS bit may be missed when
+	SRC sample it, need to write the wdog controller
+	twice to avoid it */
+	__raw_writew(wcr_enable, wdog_base);
 
 	/* wait for reset to assert... */
 	mdelay(500);
@@ -88,21 +84,6 @@ void arch_reset(char mode, const char *cmd)
 		mx51_efikamx_reset();
 		return;
 	}
-#endif
-#ifdef CONFIG_ARCH_MX51
-	/* Workaround to reset NFC_CONFIG3 register
-	 * due to the chip warm reset does not reset it
-	 */
-	 if (cpu_is_mx53())
-		__raw_writel(0x20600, MX53_IO_ADDRESS(MX53_NFC_BASE_ADDR)+0x28);
-	 if (cpu_is_mx51())
-		__raw_writel(0x20600, MX51_IO_ADDRESS(MX51_NFC_BASE_ADDR)+0x28);
-#endif
-
-#ifdef CONFIG_ARCH_MX5
-	/* Stop DVFS-CORE before reboot. */
-	if (dvfs_core_is_active)
-		stop_dvfs();
 #endif
 
 	if (cpu_is_mx1()) {

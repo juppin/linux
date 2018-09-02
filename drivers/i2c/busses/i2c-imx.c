@@ -84,6 +84,7 @@
 #define I2CR_IIEN	0x40
 #define I2CR_IEN	0x80
 
+
 /** Variables ******************************************************************
 *******************************************************************************/
 
@@ -133,6 +134,8 @@ static int i2c_imx_bus_busy(struct imx_i2c_struct *i2c_imx, int for_busy)
 {
 	unsigned long orig_jiffies = jiffies;
 	unsigned int temp;
+	unsigned long dwRetryMaxCnt=5000;
+	unsigned long dwRetryCnt=0;
 
 	dev_dbg(&i2c_imx->adapter.dev, "<%s>\n", __func__);
 
@@ -152,7 +155,17 @@ static int i2c_imx_bus_busy(struct imx_i2c_struct *i2c_imx, int for_busy)
 				"<%s> I2C bus is busy\n", __func__);
 			return -ETIMEDOUT;
 		}
-		schedule();
+
+		if(in_atomic() || in_interrupt() ) {
+			if(++dwRetryCnt>dwRetryMaxCnt) {
+				printk(KERN_ERR"%s retry over %d times \n",__FUNCTION__,dwRetryMaxCnt);
+				break;
+			}
+			udelay(100);
+		}
+		else {
+			schedule();
+		}
 	}
 
 	return 0;
@@ -160,7 +173,27 @@ static int i2c_imx_bus_busy(struct imx_i2c_struct *i2c_imx, int for_busy)
 
 static int i2c_imx_trx_complete(struct imx_i2c_struct *i2c_imx)
 {
-	wait_event_timeout(i2c_imx->queue, i2c_imx->i2csr & I2SR_IIF, HZ / 10);
+	if(in_atomic() || in_interrupt()) {
+		unsigned long dwRetryMaxCnt=1000;
+		unsigned long dwRetryCnt=0;
+
+		do {
+			i2c_imx->i2csr |= readb(i2c_imx->base + IMX_I2C_I2SR);
+			if(i2c_imx->i2csr & I2SR_IIF) {
+				break;
+			}
+
+			if(dwRetryCnt++>dwRetryMaxCnt) {
+				printk(KERN_ERR"%s retry over %d times !!\n",__FUNCTION__,dwRetryMaxCnt);
+				break;
+			}
+			udelay(100);
+		}while(1) ;
+		
+	}
+	else {
+		wait_event_timeout(i2c_imx->queue, i2c_imx->i2csr & I2SR_IIF, HZ / 10);
+	}
 
 	if (unlikely(!(i2c_imx->i2csr & I2SR_IIF))) {
 		dev_dbg(&i2c_imx->adapter.dev, "<%s> Timeout\n", __func__);
@@ -182,6 +215,7 @@ static int i2c_imx_acked(struct imx_i2c_struct *i2c_imx)
 	return 0;
 }
 
+extern int _ntx_get_wifi_power_status(void);
 static void i2c_imx_set_clk(struct imx_i2c_struct *i2c_imx,
 							unsigned int rate)
 {
@@ -189,12 +223,16 @@ static void i2c_imx_set_clk(struct imx_i2c_struct *i2c_imx,
 	unsigned int div;
 	int i;
 
+	if (400000==rate && _ntx_get_wifi_power_status()) {
+		rate = 100000;
+	}
+
 	/* Divider value calculation */
 	i2c_clk_rate = clk_get_rate(i2c_imx->clk);
-	if (i2c_imx->cur_clk == i2c_clk_rate)
+	if (i2c_imx->cur_clk == rate)
 		return;
 	else
-		i2c_imx->cur_clk = i2c_clk_rate;
+		i2c_imx->cur_clk = rate;
 	div = (i2c_clk_rate + rate - 1) / rate;
 	if (div < i2c_clk_div[0][0])
 		i = 0;

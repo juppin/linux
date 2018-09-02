@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*    Copyright (C) 2005 - 2013 by Vivante Corp.
+*    Copyright (C) 2005 - 2012 by Vivante Corp.
 *
 *    This program is free software; you can redistribute it and/or modify
 *    it under the terms of the GNU General Public License as published by
@@ -17,6 +17,8 @@
 *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 *
 *****************************************************************************/
+
+
 
 
 #ifndef __gc_hal_engine_h_
@@ -323,13 +325,48 @@ gcoSURF_Resolve(
     IN gcoSURF DestSurface
     );
 
+/* Export the render target. */
 gceSTATUS
-gcoSURF_IsHWResolveable(
+gcoSURF_ExportRenderTarget(
+    IN gcoSURF SrcSurface
+);
+
+/* Import the render target. */
+gceSTATUS
+gcoSURF_ImportRenderTarget(
+    IN gctUINT32 Pid,
+    IN gcoSURF SrcSurface
+);
+
+/* Save the Resolve info to kernel. */
+gceSTATUS
+gcoSURF_PrepareRemoteResolveRect(
     IN gcoSURF SrcSurface,
-    IN gcoSURF DestSurface,
     IN gcsPOINT_PTR SrcOrigin,
     IN gcsPOINT_PTR DestOrigin,
     IN gcsPOINT_PTR RectSize
+    );
+
+/* Resolve using the rectangle info previously saved in the vid mem node. */
+gceSTATUS
+gcoSURF_ResolveFromStoredRect(
+    IN gcoSURF SrcSurface,
+    IN gcoSURF DestSurface
+    );
+
+/* Using the info that Process Pid saved to do resolve. */
+gceSTATUS
+gcoSURF_RemoteResolveRect(
+    IN gcoSURF SrcSurface,
+    IN gcoSURF DestSurface,
+    IN gctBOOL *resolveDiscarded
+    );
+
+/* Return the "resolve submitted indicator" signal. */
+gceSTATUS
+gcoSURF_GetRTSignal(
+    IN gcoSURF RTSurface,
+    OUT gctSIGNAL * resolveSubmittedSignal
     );
 
 /* Resolve rectangular area of a surface. */
@@ -353,42 +390,6 @@ gceSTATUS
 gcoSURF_IsRenderable(
     IN gcoSURF Surface
     );
-
-gceSTATUS
-gcoSURF_IsFormatRenderableAsRT(
-    IN gcoSURF Surface
-    );
-
-#if gcdSYNC
-gceSTATUS
-gcoSURF_GetFence(
-    IN gcoSURF Surface
-    );
-gceSTATUS
-gcoSURF_WaitFence(
-    IN gcoSURF Surface
-    );
-
-gceSTATUS
-gcoSTREAM_GetFence(
-    IN gcoSTREAM stream
-    );
-
-gceSTATUS
-gcoSTREAM_WaitFence(
-    IN gcoSTREAM stream
-    );
-
-gceSTATUS
-gcoINDEX_GetFence(
-    IN gcoINDEX index
-    );
-
-gceSTATUS
-gcoINDEX_WaitFence(
-    IN gcoINDEX index
-    );
-#endif
 
 /******************************************************************************\
 ******************************** gcoINDEX Object *******************************
@@ -1020,7 +1021,6 @@ typedef struct _gcsALPHA_INFO
     gctBOOL                 test;
     gceCOMPARE              compare;
     gctUINT8                reference;
-    gctFLOAT                floatReference;
 
     /* Alpha blending states. */
     gctBOOL                 blend;
@@ -1055,8 +1055,7 @@ gco3D_SetAlphaCompare(
 gceSTATUS
 gco3D_SetAlphaReference(
     IN gco3D Engine,
-    IN gctUINT8 Reference,
-    IN gctFLOAT FloatReference
+    IN gctUINT8 Reference
     );
 
 /* Set alpha test reference in fixed point. */
@@ -1402,16 +1401,6 @@ typedef enum _gceTEXTURE_FACE
 }
 gceTEXTURE_FACE;
 
-#if gcdFORCE_MIPMAP
-typedef enum
-{
-    gcvForceMipDisabled  = 0,
-    gcvForceMipEnable    = 1,
-    gcvForceMipGenerated = 2,
-    gcvForceMipNever     = 3,
-}gceFORCE_MIPMAP;
-#endif
-
 typedef struct _gcsTEXTURE
 {
     /* Addressing modes. */
@@ -1428,10 +1417,6 @@ typedef struct _gcsTEXTURE
     gceTEXTURE_FILTER           mipFilter;
     gctUINT                     anisoFilter;
     gctBOOL                     forceTopLevel;
-    gctBOOL                     autoMipmap;
-#if gcdFORCE_MIPMAP
-    gceFORCE_MIPMAP             forceMipmap;
-#endif
     /* Level of detail. */
     gctFIXED_POINT              lodBias;
     gctFIXED_POINT              lodMin;
@@ -1465,18 +1450,7 @@ gceSTATUS
 gcoTEXTURE_Destroy(
     IN gcoTEXTURE Texture
     );
-#if gcdFORCE_MIPMAP
-gceSTATUS
-gcoTEXTURE_DestroyForceMipmap(
-    IN gcoTEXTURE Texture
-    );
 
-gceSTATUS
-gcoTEXTURE_GetMipLevels(
-    IN gcoTEXTURE Texture,
-    OUT gctINT * levels
-    );
-#endif
 /* Replace a mipmap in gcoTEXTURE object. */
 gceSTATUS
 gcoTEXTURE_ReplaceMipMap(
@@ -1517,19 +1491,6 @@ gcoTEXTURE_UploadSub(
     IN gctUINT Slice,
     IN gctCONST_POINTER Memory,
     IN gctINT Stride,
-    IN gceSURF_FORMAT Format
-    );
-
-/* Upload YUV data to an gcoTEXTURE object. */
-gceSTATUS
-gcoTEXTURE_UploadYUV(
-    IN gcoTEXTURE Texture,
-    IN gceTEXTURE_FACE Face,
-    IN gctUINT Width,
-    IN gctUINT Height,
-    IN gctUINT Slice,
-    IN gctPOINTER Memory[3],
-    IN gctINT Stride[3],
     IN gceSURF_FORMAT Format
     );
 
@@ -1650,13 +1611,6 @@ gcoTEXTURE_QueryCaps(
     );
 
 gceSTATUS
-gcoTEXTURE_GetTiling(
-    IN gcoTEXTURE Texture,
-    IN gctINT preferLevel,
-	OUT gceTILING * Tiling
-    );
-
-gceSTATUS
 gcoTEXTURE_GetClosestFormat(
     IN gcoHAL Hal,
     IN gceSURF_FORMAT InFormat,
@@ -1671,12 +1625,6 @@ gcoTEXTURE_RenderIntoMipMap(
 
 gceSTATUS
 gcoTEXTURE_IsRenderable(
-    IN gcoTEXTURE Texture,
-    IN gctUINT Level
-    );
-
-gceSTATUS
-gcoTEXTURE_IsRenderableEx(
     IN gcoTEXTURE Texture,
     IN gctUINT Level
     );
@@ -2026,24 +1974,22 @@ gceSTATUS
 gcoHAL_GetSharedInfo(
     IN gctUINT32 Pid,
     IN gctUINT32 DataId,
+    OUT gctUINT8_PTR Data,
     IN gctSIZE_T Bytes,
-    OUT gctPOINTER Data
+    IN gcuVIDMEM_NODE_PTR Node,
+    OUT gctUINT8_PTR NodeData,
+    IN gceVIDMEM_NODE_SHARED_INFO_TYPE SharedInfoType
     );
 
 gceSTATUS
 gcoHAL_SetSharedInfo(
     IN gctUINT32 DataId,
-    IN gctPOINTER Data,
-    IN gctSIZE_T Bytes
+    IN gctUINT8_PTR Data,
+    IN gctSIZE_T Bytes,
+    IN gcuVIDMEM_NODE_PTR Node,
+    IN gctUINT8_PTR NodeData,
+    IN gceVIDMEM_NODE_SHARED_INFO_TYPE SharedInfoType
     );
-
-#if VIVANTE_PROFILER_CONTEXT
-gceSTATUS
-gcoHARDWARE_GetContext(
-    IN gcoHARDWARE Hardware,
-    OUT gctUINT32 * Context
-    );
-#endif
 
 #ifdef __cplusplus
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+ * Copyright (C) 2005-2012 Freescale Semiconductor, Inc. All Rights Reserved.
  *
  * Author: Li Yang <LeoLi@freescale.com>
  *         Jerry Huang <Chang-Ming.Huang@freescale.com>

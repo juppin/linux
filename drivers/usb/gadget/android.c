@@ -46,7 +46,6 @@
 #include "epautoconf.c"
 #include "composite.c"
 
-#include "f_audio_source.c"
 #include "f_mass_storage.c"
 #include "u_serial.c"
 #include "f_acm.c"
@@ -183,6 +182,13 @@ static void android_work(struct work_struct *data)
 		pr_info("%s: did not send uevent (%d %d %p)\n", __func__,
 			 dev->connected, dev->sw_connected, cdev->config);
 	}
+}
+
+void send_usb_umount_uevent() {
+	char *host_eject[2]   = { "HOST_EJECT=TRUE", NULL };
+	char **uevent_envp = NULL;
+	uevent_envp = host_eject;
+	kobject_uevent_env(&_android_dev->dev->kobj, KOBJ_CHANGE,uevent_envp);
 }
 
 
@@ -336,7 +342,6 @@ static struct android_usb_function ptp_function = {
 	.init		= ptp_function_init,
 	.cleanup	= ptp_function_cleanup,
 	.bind_config	= ptp_function_bind_config,
-	.ctrlrequest	= mtp_function_ctrlrequest,
 };
 
 
@@ -534,14 +539,23 @@ static int mass_storage_function_init(struct android_usb_function *f,
 	struct mass_storage_function_config *config;
 	struct fsg_common *common;
 	int err;
+	int i;
 
 	config = kzalloc(sizeof(struct mass_storage_function_config),
 								GFP_KERNEL);
 	if (!config)
 		return -ENOMEM;
 
-	config->fsg.nluns = 1;
+	config->fsg.nluns = 3;
 	config->fsg.luns[0].removable = 1;
+	config->fsg.luns[1].removable = 1;
+	config->fsg.luns[2].removable = 1;
+	
+	//Terry add
+	for(i = 0; i < config->fsg.nluns; i++) {
+          config->fsg.luns[i].removable = 1;
+          config->fsg.luns[i].nofua = 1;
+    }
 
 	common = fsg_common_init(NULL, cdev, &config->fsg);
 	if (IS_ERR(common)) {
@@ -556,6 +570,25 @@ static int mass_storage_function_init(struct android_usb_function *f,
 		kfree(config);
 		return err;
 	}
+	
+	//Terry add
+	/*
+        * "i" starts from "1", cuz dont want to change the naming of
+        * the original path of "lun0".
+        */
+        for(i = 1; i < config->fsg.nluns; i++) {
+                char string_lun[5]={0};
+ 
+                sprintf(string_lun, "lun%d",i);
+ 
+                err = sysfs_create_link(&f->dev->kobj,
+                                &common->luns[i].dev.kobj,
+                                string_lun);
+                if (err) {
+                        kfree(config);
+                        return err;
+                }
+        }
 
 	config->common = common;
 	f->config = config;
@@ -645,67 +678,6 @@ static struct android_usb_function accessory_function = {
 	.ctrlrequest	= accessory_function_ctrlrequest,
 };
 
-static int audio_source_function_init(struct android_usb_function *f,
-			struct usb_composite_dev *cdev)
-{
-	struct audio_source_config *config;
-
-	config = kzalloc(sizeof(struct audio_source_config), GFP_KERNEL);
-	if (!config)
-		return -ENOMEM;
-	config->card = -1;
-	config->device = -1;
-	f->config = config;
-	return 0;
-}
-
-static void audio_source_function_cleanup(struct android_usb_function *f)
-{
-	kfree(f->config);
-}
-
-static int audio_source_function_bind_config(struct android_usb_function *f,
-						struct usb_configuration *c)
-{
-	struct audio_source_config *config = f->config;
-
-	return audio_source_bind_config(c, config);
-}
-
-static void audio_source_function_unbind_config(struct android_usb_function *f,
-						struct usb_configuration *c)
-{
-	struct audio_source_config *config = f->config;
-
-	config->card = -1;
-	config->device = -1;
-}
-
-static ssize_t audio_source_pcm_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct android_usb_function *f = dev_get_drvdata(dev);
-	struct audio_source_config *config = f->config;
-
-	/* print PCM card and device numbers */
-	return sprintf(buf, "%d %d\n", config->card, config->device);
-}
-
-static DEVICE_ATTR(pcm, S_IRUGO | S_IWUSR, audio_source_pcm_show, NULL);
-
-static struct device_attribute *audio_source_function_attributes[] = {
-	&dev_attr_pcm,
-	NULL
-};
-
-static struct android_usb_function audio_source_function = {
-	.name		= "audio_source",
-	.init		= audio_source_function_init,
-	.cleanup	= audio_source_function_cleanup,
-	.bind_config	= audio_source_function_bind_config,
-	.unbind_config	= audio_source_function_unbind_config,
-	.attributes	= audio_source_function_attributes,
-};
 
 static struct android_usb_function *supported_functions[] = {
 	&adb_function,
@@ -715,7 +687,6 @@ static struct android_usb_function *supported_functions[] = {
 	&rndis_function,
 	&mass_storage_function,
 	&accessory_function,
-	&audio_source_function,
 	NULL
 };
 
@@ -995,7 +966,10 @@ field ## _store(struct device *dev, struct device_attribute *attr,	\
 		const char *buf, size_t size)				\
 {									\
 	if (size >= sizeof(buffer)) return -EINVAL;			\
-	return strlcpy(buffer, buf, sizeof(buffer));			\
+	if (sscanf(buf, "%s", buffer) == 1) {				\
+		return size;						\
+	}								\
+	return -1;							\
 }									\
 static DEVICE_ATTR(field, S_IRUGO | S_IWUSR, field ## _show, field ## _store);
 
@@ -1179,11 +1153,6 @@ static void android_disconnect(struct usb_gadget *gadget)
 	unsigned long flags;
 
 	composite_disconnect(gadget);
-	/* accessory HID support can be active while the
-	   accessory function is not actually enabled,
-	   so we need to inform it when we are disconnected.
-	 */
-	acc_disconnect();
 
 	spin_lock_irqsave(&cdev->lock, flags);
 	dev->connected = 0;
@@ -1194,7 +1163,7 @@ static void android_disconnect(struct usb_gadget *gadget)
 static void android_suspend(struct usb_gadget *gadget)
 {
 	composite_suspend(gadget);
-	wake_lock_timeout(&wakelock, HZ/2);
+	wake_unlock(&wakelock);
 }
 
 static void android_resume(struct usb_gadget *gadget)

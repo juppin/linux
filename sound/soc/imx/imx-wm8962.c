@@ -1,7 +1,7 @@
 /*
  * imx-wm8962.c
  *
- * Copyright (C) 2012-2014 Freescale Semiconductor, Inc. All Rights Reserved.
+ * Copyright (C) 2012-2013 Freescale Semiconductor, Inc. All Rights Reserved.
  */
 
 /*
@@ -27,7 +27,6 @@
 #include <linux/fsl_devices.h>
 #include <linux/slab.h>
 #include <linux/clk.h>
-#include <linux/switch.h>
 #include <linux/kthread.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
@@ -54,7 +53,6 @@ struct imx_priv {
 	int amic_irq;
 	int amic_status;
 	struct platform_device *pdev;
-	struct switch_dev sdev;
 	struct snd_pcm_substream *first_stream;
 	struct snd_pcm_substream *second_stream;
 };
@@ -66,7 +64,7 @@ static struct snd_soc_codec *gcodec;
 static struct snd_soc_jack imx_hp_jack;
 static struct snd_soc_jack_pin imx_hp_jack_pins[] = {
 	{
-		.pin = "Headphone Jack",
+		.pin = "Ext Spk",
 		.mask = SND_JACK_HEADPHONE,
 	},
 };
@@ -90,6 +88,32 @@ static struct snd_soc_jack_gpio imx_mic_jack_gpio = {
 	.debounce_time = 150,
 	.invert = 0,
 };
+
+static int imx_hifi_startup(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct imx_priv *priv = &card_priv;
+	struct mxc_audio_platform_data *plat = priv->pdev->dev.platform_data;
+
+	if (!codec_dai->active)
+		plat->clock_enable(1);
+
+	return 0;
+}
+
+static void imx_hifi_shutdown(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct imx_priv *priv = &card_priv;
+	struct mxc_audio_platform_data *plat = priv->pdev->dev.platform_data;
+
+	if (!codec_dai->active)
+		plat->clock_enable(0);
+
+	return;
+}
 
 static int check_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params)
@@ -293,25 +317,17 @@ static void imx_resume_event(struct work_struct *wor)
 	return;
 }
 
-static int hp_jack_status_check(void)
+static int imx_event_hp(struct snd_soc_dapm_widget *w,
+				struct snd_kcontrol *kcontrol, int event)
 {
 	struct imx_priv *priv = &card_priv;
 	struct platform_device *pdev = priv->pdev;
 	struct mxc_audio_platform_data *plat = pdev->dev.platform_data;
 	char *envp[3];
 	char *buf;
-	int  ret = 0;
 
 	if (plat->hp_gpio != -1) {
 		priv->hp_status = gpio_get_value(plat->hp_gpio);
-
-		/* if headphone is inserted, disable speaker */
-		if (priv->hp_status != plat->hp_active_low)
-			snd_soc_dapm_nc_pin(&gcodec->dapm, "Ext Spk");
-		else
-			snd_soc_dapm_enable_pin(&gcodec->dapm, "Ext Spk");
-
-		snd_soc_dapm_sync(&gcodec->dapm);
 
 		buf = kmalloc(32, GFP_ATOMIC);
 		if (!buf) {
@@ -319,14 +335,11 @@ static int hp_jack_status_check(void)
 			return -ENOMEM;
 		}
 
-		if (priv->hp_status != plat->hp_active_low) {
-			switch_set_state(&priv->sdev, 2);
+		if (priv->hp_status != plat->hp_active_low)
 			snprintf(buf, 32, "STATE=%d", 2);
-			ret = imx_hp_jack_gpio.report;
-		} else {
-			switch_set_state(&priv->sdev, 0);
+		else
 			snprintf(buf, 32, "STATE=%d", 0);
-		}
+
 		envp[0] = "NAME=headphone";
 		envp[1] = buf;
 		envp[2] = NULL;
@@ -334,15 +347,53 @@ static int hp_jack_status_check(void)
 		kfree(buf);
 	}
 
-	return ret;
+	return 0;
 }
+
+static int imx_event_mic(struct snd_soc_dapm_widget *w,
+				struct snd_kcontrol *kcontrol, int event)
+{
+	struct imx_priv *priv = &card_priv;
+	struct platform_device *pdev = priv->pdev;
+	struct mxc_audio_platform_data *plat = pdev->dev.platform_data;
+	char *envp[3];
+	char *buf;
+
+	if (plat->mic_gpio != -1) {
+		priv->amic_status = gpio_get_value(plat->mic_gpio);
+
+		buf = kmalloc(32, GFP_ATOMIC);
+		if (!buf) {
+			pr_err("%s kmalloc failed\n", __func__);
+			return -ENOMEM;
+		}
+
+		if (priv->amic_status == 0)
+			snprintf(buf, 32, "STATE=%d", 2);
+		else
+			snprintf(buf, 32, "STATE=%d", 0);
+
+		envp[0] = "NAME=amic";
+		envp[1] = buf;
+		envp[2] = NULL;
+		kobject_uevent_env(&pdev->dev.kobj, KOBJ_CHANGE, envp);
+		kfree(buf);
+	}
+
+	return 0;
+}
+
+
+static const struct snd_kcontrol_new controls[] = {
+	SOC_DAPM_PIN_SWITCH("Ext Spk"),
+};
 
 /* imx card dapm widgets */
 static const struct snd_soc_dapm_widget imx_dapm_widgets[] = {
 	SND_SOC_DAPM_HP("Headphone Jack", NULL),
-	SND_SOC_DAPM_SPK("Ext Spk", NULL),
+	SND_SOC_DAPM_SPK("Ext Spk", imx_event_hp),
 	SND_SOC_DAPM_MIC("AMIC", NULL),
-	SND_SOC_DAPM_MIC("DMIC", NULL),
+	SND_SOC_DAPM_MIC("DMIC", imx_event_mic),
 };
 
 /* imx machine connections to the codec pins */
@@ -366,9 +417,6 @@ static ssize_t show_headphone(struct device_driver *dev, char *buf)
 	struct imx_priv *priv = &card_priv;
 	struct platform_device *pdev = priv->pdev;
 	struct mxc_audio_platform_data *plat = pdev->dev.platform_data;
-
-	if (plat->hp_gpio == -1)
-		return 0;
 
 	/* determine whether hp is plugged in */
 	priv->hp_status = gpio_get_value(plat->hp_gpio);
@@ -436,14 +484,12 @@ static int imx_wm8962_init(struct snd_soc_pcm_runtime *rtd)
 	/* Set up imx specific audio path audio_map */
 	snd_soc_dapm_add_routes(&codec->dapm, audio_map, ARRAY_SIZE(audio_map));
 
-	snd_soc_dapm_enable_pin(&codec->dapm, "Ext Spk");
+	snd_soc_dapm_enable_pin(&codec->dapm, "Headphone Jack");
 	snd_soc_dapm_enable_pin(&codec->dapm, "AMIC");
 
 	if (plat->hp_gpio != -1) {
 		imx_hp_jack_gpio.gpio = plat->hp_gpio;
-		imx_hp_jack_gpio.jack_status_check = hp_jack_status_check;
-
-		snd_soc_jack_new(codec, "Headphone Jack", SND_JACK_HEADPHONE,
+		snd_soc_jack_new(codec, "Ext Spk", SND_JACK_LINEOUT,
 				&imx_hp_jack);
 		snd_soc_jack_add_pins(&imx_hp_jack,
 					ARRAY_SIZE(imx_hp_jack_pins),
@@ -457,14 +503,6 @@ static int imx_wm8962_init(struct snd_soc_pcm_runtime *rtd)
 			ret = -EINVAL;
 			return ret;
 		}
-
-		priv->hp_status = gpio_get_value(plat->hp_gpio);
-
-		/* if headphone is inserted, disable speaker */
-		if (priv->hp_status != plat->hp_active_low)
-			snd_soc_dapm_nc_pin(&codec->dapm, "Ext Spk");
-		else
-			snd_soc_dapm_enable_pin(&codec->dapm, "Ext Spk");
 	}
 
 	if (plat->mic_gpio != -1) {
@@ -489,12 +527,12 @@ static int imx_wm8962_init(struct snd_soc_pcm_runtime *rtd)
 
 	snd_soc_dapm_sync(&codec->dapm);
 
-	snd_soc_dapm_sync(&codec->dapm);
-
 	return 0;
 }
 
 static struct snd_soc_ops imx_hifi_ops = {
+	.startup = imx_hifi_startup,
+	.shutdown = imx_hifi_shutdown,
 	.hw_params = imx_hifi_hw_params,
 	.hw_free = imx_hifi_hw_free,
 	.trigger = imx_hifi_trigger,
@@ -561,20 +599,6 @@ static int __devinit imx_wm8962_probe(struct platform_device *pdev)
 
 	priv->sysclk = plat->sysclk;
 
-	priv->sdev.name = "h2w";
-	ret = switch_dev_register(&priv->sdev);
-	if (ret < 0) {
-		ret = -EINVAL;
-		return ret;
-	}
-
-	if (plat->hp_gpio != -1) {
-		priv->hp_status = gpio_get_value(plat->hp_gpio);
-		if (priv->hp_status != plat->hp_active_low)
-			switch_set_state(&priv->sdev, 2);
-		else
-			switch_set_state(&priv->sdev, 0);
-	}
 	priv->first_stream = NULL;
 	priv->second_stream = NULL;
 
@@ -588,8 +612,6 @@ static int __devexit imx_wm8962_remove(struct platform_device *pdev)
 
 	if (plat->finit)
 		plat->finit();
-
-	switch_dev_unregister(&priv->sdev);
 
 	if (priv->hp_irq)
 		free_irq(priv->hp_irq, priv);

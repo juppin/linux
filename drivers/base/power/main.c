@@ -869,6 +869,15 @@ int dpm_suspend_noirq(pm_message_t state)
 			list_move(&dev->power.entry, &dpm_noirq_list);
 		put_device(dev);
 	}
+
+	//Yian, Drop Power key during kernel suspend, since the key will be queued 
+	//and next wakeup, android will get two power keys, then system sleep.
+	{
+		extern int gKernel_Enter_Suspend;
+		gKernel_Enter_Suspend = 0;
+		printk("==> Kernel Suspend Finish");
+	}
+	
 	mutex_unlock(&dpm_list_mtx);
 	if (error) {
 		resume_irqs(true);

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2005 MontaVista Software
- * Copyright (C) 2013-2014 Freescale Semiconductor, Inc.
+ * Copyright (C) 2012 Freescale Semiconductor, Inc.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -246,6 +246,7 @@ int usb_hcd_fsl_probe(const struct hc_driver *driver,
 	 * do platform specific init: check the clock, grab/config pins, etc.
 	 */
 	if (pdata->init && pdata->init(pdev)) {
+		pdata->lowpower = false;
 		retval = -ENODEV;
 		goto err4;
 	}
@@ -366,8 +367,6 @@ static void usb_hcd_fsl_remove(struct usb_hcd *hcd,
 	} else {
 		release_mem_region(hcd->rsrc_start, hcd->rsrc_len);
 	}
-
-	usb_put_hcd(hcd);
 
 	fsl_usb_lowpower_mode(pdata, true);
 
@@ -699,7 +698,6 @@ static int ehci_fsl_drv_suspend(struct platform_device *pdev,
 			fsl_usb_lowpower_mode(pdata, false);
 
 			usb_host_set_wakeup(hcd->self.controller, false);
-
 			fsl_usb_lowpower_mode(pdata, true);
 
 			fsl_usb_clk_gate(hcd->self.controller->platform_data, false);
@@ -801,12 +799,12 @@ static int ehci_fsl_drv_resume(struct platform_device *pdev)
 		disable_irq(hcd->irq);
 		if (!host_can_wakeup_system(pdev)) {
 			/* Need open clock for register access */
-			u32 __iomem	*reg_ptr;
+			u32 __iomem     *reg_ptr;
 			fsl_usb_clk_gate(hcd->self.controller->platform_data, true);
 
 			reg_ptr = (u32 __iomem *)(((u8 __iomem *)ehci->regs) + USBMODE);
 			tmp = ehci_readl(ehci, reg_ptr);
-
+			
 			/* quit, if not in host mode */
 			if ((tmp & USBMODE_CM_HC) != USBMODE_CM_HC) {
 				usb_host_set_wakeup(hcd->self.controller, true);
@@ -823,7 +821,7 @@ static int ehci_fsl_drv_resume(struct platform_device *pdev)
 				id_value = !!(otgsc & OTGSC_ID_VALUE);
 				if (((tmp & PORT_CONNECT) && !id_value) || id_changed) {
 					set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
-				} else if (!(tmp & PORT_CONNECT)) {
+				} else {
 					usb_host_set_wakeup(hcd->self.controller, true);
 					fsl_usb_lowpower_mode(pdata, true);
 					fsl_usb_clk_gate(hcd->self.controller->platform_data, false);

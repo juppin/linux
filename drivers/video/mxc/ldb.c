@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2014 Freescale Semiconductor, Inc. All Rights Reserved.
+ * Copyright (C) 2012-2013 Freescale Semiconductor, Inc. All Rights Reserved.
  */
 
 /*
@@ -84,6 +84,7 @@ struct ldb_data {
 	uint32_t *reg;
 	uint32_t *control_reg;
 	uint32_t *gpr3_reg;
+	uint32_t control_reg_data;
 	struct regulator *lvds_bg_reg;
 	int mode;
 	bool inited;
@@ -91,16 +92,17 @@ struct ldb_data {
 		struct clk *di_clk;
 		struct clk *ldb_di_clk;
 		bool active;
+		bool clk_en;
 		int ipu;
 		int di;
 		uint32_t ch_mask;
 		uint32_t ch_val;
 	} setting[2];
+	struct notifier_block nb;
 };
 
 static int g_ldb_mode;
 static struct i2c_client *ldb_i2c_client[2];
-static u8 g_edid[2][512];
 
 static struct fb_videomode ldb_modedb[] = {
 	{
@@ -129,8 +131,6 @@ static struct fb_videomode ldb_modedb[] = {
 	 FB_MODE_IS_DETAILED,},
 };
 static int ldb_modedb_sz = ARRAY_SIZE(ldb_modedb);
-
-static int mxc_ldb_edidread(struct i2c_client *client);
 
 static int bits_per_pixel(int pixel_fmt)
 {
@@ -223,7 +223,7 @@ static int find_ldb_setting(struct ldb_data *ldb, struct fb_info *fbi)
 
 static int ldb_disp_setup(struct mxc_dispdrv_handle *disp, struct fb_info *fbi)
 {
-	uint32_t reg;
+	uint32_t reg, val;
 	uint32_t pixel_clk, rounded_pixel_clk;
 	struct clk *ldb_clk_parent;
 	struct ldb_data *ldb = mxc_dispdrv_getdata(disp);
@@ -235,10 +235,15 @@ static int ldb_disp_setup(struct mxc_dispdrv_handle *disp, struct fb_info *fbi)
 
 	di = ldb->setting[setting_idx].di;
 
-	reg = readl(ldb->control_reg);
-	/* clear channel mode */
-	reg &= ~ldb->setting[setting_idx].ch_mask;
+	/* restore channel mode setting */
+	val = readl(ldb->control_reg);
+	val |= ldb->setting[setting_idx].ch_val;
+	writel(val, ldb->control_reg);
+	dev_dbg(&ldb->pdev->dev, "LDB setup, control reg:0x%x\n",
+			readl(ldb->control_reg));
+
 	/* vsync setup */
+	reg = readl(ldb->control_reg);
 	if (fbi->var.sync & FB_SYNC_VERT_HIGH_ACT) {
 		if (di == 0)
 			reg = (reg & ~LDB_DI0_VS_POL_MASK)
@@ -257,6 +262,8 @@ static int ldb_disp_setup(struct mxc_dispdrv_handle *disp, struct fb_info *fbi)
 	writel(reg, ldb->control_reg);
 
 	/* clk setup */
+	if (ldb->setting[setting_idx].clk_en)
+		clk_disable(ldb->setting[setting_idx].ldb_di_clk);
 	pixel_clk = (PICOS2KHZ(fbi->var.pixclock)) * 1000UL;
 	ldb_clk_parent = clk_get_parent(ldb->setting[setting_idx].ldb_di_clk);
 	if ((ldb->mode == LDB_SPL_DI0) || (ldb->mode == LDB_SPL_DI1))
@@ -266,42 +273,74 @@ static int ldb_disp_setup(struct mxc_dispdrv_handle *disp, struct fb_info *fbi)
 	rounded_pixel_clk = clk_round_rate(ldb->setting[setting_idx].ldb_di_clk,
 			pixel_clk);
 	clk_set_rate(ldb->setting[setting_idx].ldb_di_clk, rounded_pixel_clk);
+	clk_enable(ldb->setting[setting_idx].ldb_di_clk);
+	if (!ldb->setting[setting_idx].clk_en)
+		ldb->setting[setting_idx].clk_en = true;
 
 	return 0;
 }
 
-static int ldb_disp_enable(struct mxc_dispdrv_handle *disp,
-			   struct fb_info *fbi)
+int ldb_fb_event(struct notifier_block *nb, unsigned long val, void *v)
 {
-	struct ldb_data *ldb = mxc_dispdrv_getdata(disp);
+	struct ldb_data *ldb = container_of(nb, struct ldb_data, nb);
+	struct fb_event *event = v;
+	struct fb_info *fbi = event->info;
 	int index;
-	uint32_t reg;
+	uint32_t data;
 
 	index = find_ldb_setting(ldb, fbi);
 	if (index < 0)
-		return index;
+		return 0;
 
-	reg = readl(ldb->control_reg);
-	reg |= ldb->setting[index].ch_val;
-	writel(reg, ldb->control_reg);
+	fbi->mode = (struct fb_videomode *)fb_match_mode(&fbi->var,
+			&fbi->modelist);
 
+	if (!fbi->mode) {
+		dev_warn(&ldb->pdev->dev,
+				"LDB: can not find mode for xres=%d, yres=%d\n",
+				fbi->var.xres, fbi->var.yres);
+		if (ldb->setting[index].clk_en) {
+			clk_disable(ldb->setting[index].ldb_di_clk);
+			ldb->setting[index].clk_en = false;
+			data = readl(ldb->control_reg);
+			data &= ~ldb->setting[index].ch_mask;
+			writel(data, ldb->control_reg);
+		}
+		return 0;
+	}
+
+	switch (val) {
+	case FB_EVENT_BLANK:
+	{
+		if (*((int *)event->data) == FB_BLANK_UNBLANK) {
+			if (!ldb->setting[index].clk_en) {
+				clk_enable(ldb->setting[index].ldb_di_clk);
+				ldb->setting[index].clk_en = true;
+			}
+		} else {
+			if (ldb->setting[index].clk_en) {
+				clk_disable(ldb->setting[index].ldb_di_clk);
+				ldb->setting[index].clk_en = false;
+				data = readl(ldb->control_reg);
+				data &= ~ldb->setting[index].ch_mask;
+				writel(data, ldb->control_reg);
+				dev_dbg(&ldb->pdev->dev,
+					"LDB blank, control reg:0x%x\n",
+						readl(ldb->control_reg));
+			}
+		}
+		break;
+	}
+	case FB_EVENT_SUSPEND:
+		if (ldb->setting[index].clk_en) {
+			clk_disable(ldb->setting[index].ldb_di_clk);
+			ldb->setting[index].clk_en = false;
+		}
+		break;
+	default:
+		break;
+	}
 	return 0;
-}
-
-static void ldb_disp_disable(struct mxc_dispdrv_handle *disp,
-			     struct fb_info *fbi)
-{
-	struct ldb_data *ldb = mxc_dispdrv_getdata(disp);
-	int index;
-	uint32_t reg;
-
-	index = find_ldb_setting(ldb, fbi);
-	if (index < 0)
-		return;
-
-	reg = readl(ldb->control_reg);
-	reg &= ~ldb->setting[index].ch_mask;
-	writel(reg, ldb->control_reg);
 }
 
 #define LVDS_MUX_CTL_WIDTH	2
@@ -379,7 +418,6 @@ static int ldb_disp_init(struct mxc_dispdrv_handle *disp,
 	uint32_t base_addr;
 	uint32_t reg, setting_idx;
 	uint32_t ch_mask = 0, ch_val = 0;
-	int lvds_channel = 0;
 	uint32_t ipu_id, disp_id;
 
 	/* if input format not valid, make RGB666 as default*/
@@ -392,6 +430,7 @@ static int ldb_disp_init(struct mxc_dispdrv_handle *disp,
 	if (!ldb->inited) {
 		char di_clk[] = "ipu1_di0_clk";
 		char ldb_clk[] = "ldb_di0_clk";
+		int lvds_channel = 0;
 
 		setting_idx = 0;
 		res = platform_get_resource(ldb->pdev, IORESOURCE_MEM, 0);
@@ -573,13 +612,22 @@ static int ldb_disp_init(struct mxc_dispdrv_handle *disp,
 
 		dev_dbg(&ldb->pdev->dev, "ldb_clk to di clk: %s -> %s\n", ldb_clk, di_clk);
 
+		/* fb notifier for clk setting */
+		ldb->nb.notifier_call = ldb_fb_event,
+		ret = fb_register_client(&ldb->nb);
+		if (ret < 0) {
+			iounmap(ldb->reg);
+			return ret;
+		}
+
 		ldb->inited = true;
 
-		i2c_dev = ldb_i2c_client[lvds_channel];
+		i2c_dev = ldb_i2c_client[0];
 
 	} else { /* second time for separate mode */
 		char di_clk[] = "ipu1_di0_clk";
 		char ldb_clk[] = "ldb_di0_clk";
+		int lvds_channel;
 
 		if ((ldb->mode == LDB_SPL_DI0) ||
 			(ldb->mode == LDB_SPL_DI1) ||
@@ -658,7 +706,7 @@ static int ldb_disp_init(struct mxc_dispdrv_handle *disp,
 			return PTR_ERR(ldb->setting[setting_idx].di_clk);
 		}
 
-		i2c_dev = ldb_i2c_client[lvds_channel];
+		i2c_dev = ldb_i2c_client[1];
 
 		dev_dbg(&ldb->pdev->dev, "ldb_clk to di clk: %s -> %s\n", ldb_clk, di_clk);
 	}
@@ -698,23 +746,6 @@ static int ldb_disp_init(struct mxc_dispdrv_handle *disp,
 		}
 	}
 
-	/* get screen size in edid */
-	if (i2c_dev) {
-		ret = mxc_ldb_edidread(i2c_dev);
-		if (ret > 0) {
-			fb_edid_to_monspecs(&g_edid[lvds_channel][0],
-						&setting->fbi->monspecs);
-			/* centimeter to millimeter */
-			setting->fbi->var.width =
-					setting->fbi->monspecs.max_x * 10;
-			setting->fbi->var.height =
-					setting->fbi->monspecs.max_y * 10;
-		} else {
-			/* ignore i2c access failure */
-			ret = 0;
-		}
-	}
-
 	/* save current ldb setting for fb notifier */
 	ldb->setting[setting_idx].active = true;
 	ldb->setting[setting_idx].ipu = setting->dev_id;
@@ -735,6 +766,8 @@ static void ldb_disp_deinit(struct mxc_dispdrv_handle *disp)
 		clk_put(ldb->setting[i].ldb_di_clk);
 	}
 
+	fb_unregister_client(&ldb->nb);
+
 	iounmap(ldb->reg);
 }
 
@@ -743,16 +776,39 @@ static struct mxc_dispdrv_driver ldb_drv = {
 	.init 	= ldb_disp_init,
 	.deinit	= ldb_disp_deinit,
 	.setup = ldb_disp_setup,
-	.enable = ldb_disp_enable,
-	.disable = ldb_disp_disable,
 };
 
-static int mxc_ldb_edidread(struct i2c_client *client)
+static int ldb_suspend(struct platform_device *pdev, pm_message_t state)
+{
+	struct ldb_data *ldb = dev_get_drvdata(&pdev->dev);
+	uint32_t	data;
+
+	if (!ldb->inited)
+		return 0;
+	data = readl(ldb->control_reg);
+	ldb->control_reg_data = data;
+	data &= ~(LDB_CH0_MODE_MASK | LDB_CH1_MODE_MASK);
+	writel(data, ldb->control_reg);
+
+	return 0;
+}
+
+static int ldb_resume(struct platform_device *pdev)
+{
+	struct ldb_data *ldb = dev_get_drvdata(&pdev->dev);
+
+	if (!ldb->inited)
+		return 0;
+	writel(ldb->control_reg_data, ldb->control_reg);
+
+	return 0;
+}
+
+static int mxc_ldb_edidread(struct i2c_adapter *adp)
 {
 	int ret = 0;
+	u8 edid[512];
 	unsigned char regaddr = 0;
-	struct i2c_adapter *adp = client->adapter;
-	int ldb_id = (int)client->dev.platform_data;
 	struct i2c_msg msg[2] = {
 		{
 		.addr	= 0x50,
@@ -763,7 +819,7 @@ static int mxc_ldb_edidread(struct i2c_client *client)
 		.addr	= 0x50,
 		.flags	= I2C_M_RD,
 		.len	= 512,
-		.buf	= &g_edid[ldb_id][0],
+		.buf	= edid,
 		},
 	};
 
@@ -781,7 +837,7 @@ static ssize_t mxc_ldb_show_state(struct device *dev,
 	int ret;
 	struct i2c_client *client = to_i2c_client(dev);
 
-	ret = mxc_ldb_edidread(client);
+	ret = mxc_ldb_edidread(client->adapter);
 	if (ret < 0)
 		strcpy(buf, "plugout\n");
 	else
@@ -896,6 +952,8 @@ static struct platform_driver mxcldb_driver = {
 		   },
 	.probe = ldb_probe,
 	.remove = ldb_remove,
+	.suspend = ldb_suspend,
+	.resume = ldb_resume,
 };
 
 static int __init ldb_init(void)

@@ -34,6 +34,9 @@
 #include "crm_regs.h"
 #include "regs-anadig.h"
 
+#include "ntx_hwconfig.h"
+
+
 #define SCU_CTRL					0x00
 #define SCU_CONFIG					0x04
 #define SCU_CPU_STATUS				0x08
@@ -65,11 +68,16 @@ extern void (*mx6sl_wfi_iram)(int arm_podf, unsigned long wfi_iram_addr, \
 			int audio_mode);
 extern void mx6_wait(void *num_cpu_idle_lock, void *num_cpu_idle, \
 				int wait_arm_podf, int cur_arm_podf);
+extern unsigned long save_ttbr1(void);
+extern void restore_ttbr1(u32 ttbr1);
+
 extern bool enable_wait_mode;
 extern int low_bus_freq_mode;
 extern int audio_bus_freq_mode;
 extern bool mem_clk_on_in_wait;
 extern int chip_rev;
+
+extern volatile NTX_HWCONFIG *gptHWCFG;
 
 void gpc_set_wakeup(unsigned int irq[4])
 {
@@ -113,12 +121,12 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
 	 * is a dsm_wakeup_signal, which means the wakeup source
 	 * must be seen by GPC, then CCM will clean its state machine
 	 * and re-sample necessary signal to decide whether it can
-	 * enter LPM mode. Here we use the forever pending irq #125,
+	 * enter LPM mode. Here we force irq #32 to be always pending,
 	 * unmask it before we enable LPM mode and mask it after LPM
 	 * is enabled, this flow will make sure CCM state machine in
 	 * reliable state before we enter LPM mode.
 	 */
-	gpc_mask_single_irq(MXC_INT_CHEETAH_PARITY, false);
+	gpc_mask_single_irq(MXC_INT_GPR, false);
 
 	switch (mode) {
 	case WAIT_CLOCKED:
@@ -177,7 +185,7 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
 		break;
 	default:
 		printk(KERN_WARNING "UNKNOWN cpu power mode: %d\n", mode);
-		gpc_mask_single_irq(MXC_INT_CHEETAH_PARITY, true);
+		gpc_mask_single_irq(MXC_INT_GPR, true);
 		return;
 	}
 
@@ -196,7 +204,12 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
 		if (stop_mode >= 2) {
 			/* dormant mode, need to power off the arm core */
 			__raw_writel(0x1, gpc_base + GPC_PGC_CPU_PDN_OFFSET);
-			if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+#if 0
+			if (cpu_is_mx6q() || cpu_is_mx6dl() && (4!=gptHWCFG->m_val.bRamType) ) 
+#else
+			if( cpu_is_mx6q() || cpu_is_mx6dl() )
+#endif
+			{
 				/* If stop_mode_config is clear, then 2P5 will be off,
 				need to enable weak 2P5, as DDR IO need 2P5 as
 				pre-driver */
@@ -219,6 +232,7 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
 				}
 			} else {
 				if (stop_mode == 2) {
+#if 1
 					/* Disable VDDHIGH_IN to VDDSNVS_IN
 					  * power path, only used when VDDSNVS_IN
 					  * is powered by dedicated
@@ -228,12 +242,39 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
 					anatop_val |= BM_ANADIG_ANA_MISC0_RTC_RINGOSC_EN;
 					__raw_writel(anatop_val, anatop_base +
 						HW_ANADIG_ANA_MISC0);
+#endif
 					/* Need to enable pull down if 2P5 is disabled */
+						anatop_val = __raw_readl(anatop_base +
+							HW_ANADIG_REG_2P5);
+
+#if 1 //[ 
+						if ( /* <= E60Q2XA14 */ 
+							 	(33==gptHWCFG->m_val.bPCB && gptHWCFG->m_val.bPCB_REV<=0x14 ) ||
+								 /* <= E60Q30BXX */ 
+				 			  (36==gptHWCFG->m_val.bPCB && gptHWCFG->m_val.bPCB_LVL==1 ) ||
+								 /* <= E60QBXA00 */ 
+				 			  (37==gptHWCFG->m_val.bPCB && gptHWCFG->m_val.bPCB_REV<=0 ) ) 
+						{
+							//printk("%s<=E60Q2XA14|<=E60Q3XA00\n",__FUNCTION__);
+							/* Enable weak 2P5 linear regulator */
+							anatop_val |= BM_ANADIG_REG_2P5_ENABLE_WEAK_LINREG|
+								BM_ANADIG_REG_2P5_ENABLE_ILIMIT;
+						}
+						else
+						{
+							anatop_val |= (BM_ANADIG_REG_2P5_ENABLE_ILIMIT|
+								BM_ANADIG_REG_2P5_ENABLE_PULLDOWN);
+						}
+#endif //]
+
+						__raw_writel(anatop_val, anatop_base +
+							HW_ANADIG_REG_2P5);
+
 					anatop_val = __raw_readl(anatop_base +
-						HW_ANADIG_REG_2P5);
-					anatop_val |= BM_ANADIG_REG_2P5_ENABLE_PULLDOWN;
+						HW_ANADIG_REG_1P1);
+					anatop_val |= BM_ANADIG_REG_1P1_ENABLE_ILIMIT;
 					__raw_writel(anatop_val, anatop_base +
-						HW_ANADIG_REG_2P5);
+                        HW_ANADIG_REG_1P1);
 				}
 			}
 			if (stop_mode != 3) {
@@ -275,7 +316,7 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
 		}
 	}
 	__raw_writel(ccm_clpcr, MXC_CCM_CLPCR);
-	gpc_mask_single_irq(MXC_INT_CHEETAH_PARITY, true);
+	gpc_mask_single_irq(MXC_INT_GPR, true);
 }
 
 extern int tick_broadcast_oneshot_active(void);
@@ -316,13 +357,17 @@ void arch_idle_single_core(void)
 				  * reduce power.
 				  */
 				u32 org_arm_podf = __raw_readl(MXC_CCM_CACRR);
+				u32 ttbr1;
 
+				outer_sync();
 				/* Need to run WFI code from IRAM so that
-				  * we can lower DDR freq.
-				  */
+				 * we can lower DDR freq.
+				 */
+				ttbr1 = save_ttbr1();
 				mx6sl_wfi_iram(org_arm_podf,
 					(unsigned long)mx6sl_wfi_iram_base,
 					audio_bus_freq_mode);
+				restore_ttbr1(ttbr1);
 			} else {
 				/* Need to set ARM to run at 24MHz since IPG
 				  * is at 12MHz. This is valid for audio mode on

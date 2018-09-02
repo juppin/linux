@@ -305,15 +305,6 @@ struct platform_device *__init imx_add_mxc_nand(
 		const struct imx_mxc_nand_data *data,
 		const struct mxc_nand_platform_data *pdata);
 
-struct imx_mxc_epit_data {
-    int id;
-    resource_size_t iobase;
-    resource_size_t iosize;
-    resource_size_t irq;
-};
-struct platform_device *__init imx_add_mxc_epit(
-		const struct imx_mxc_epit_data *data);
-
 struct imx_mxc_pwm_data {
 	int id;
 	resource_size_t iobase;
@@ -438,8 +429,6 @@ struct imx_mxc_gpu_data {
 	resource_size_t iobase_3d;
 	resource_size_t gmem_base;
 	resource_size_t gmem_size;
-	resource_size_t gmem_reserved_base;
-	resource_size_t gmem_reserved_size;
 };
 
 struct platform_device *__init imx_add_mxc_gpu(

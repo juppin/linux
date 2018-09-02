@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2014 Freescale Semiconductor, Inc. All Rights Reserved.
+ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -53,7 +53,6 @@
 #include <sound/wm8962.h>
 #include <sound/pcm.h>
 #include <linux/power/sabresd_battery.h>
-#include <linux/ion.h>
 
 #include <mach/common.h>
 #include <mach/hardware.h>
@@ -62,7 +61,6 @@
 #include <mach/iomux-mx6sl.h>
 #include <mach/imx-uart.h>
 #include <mach/viv_gpu.h>
-#include <mach/imx_rfkill.h>
 
 #include <asm/irq.h>
 #include <asm/setup.h>
@@ -79,9 +77,6 @@
 
 static int spdc_sel;
 static int max17135_regulator_init(struct max17135 *max17135);
-static void mx6sl_evk_suspend_enter(void);
-static void mx6sl_evk_suspend_exit(void);
-
 struct clk *extern_audio_root;
 
 extern char *gp_reg_id;
@@ -90,21 +85,6 @@ extern char *pu_reg_id;
 extern int __init mx6sl_evk_init_pfuze100(u32 int_gpio);
 
 static int csi_enabled;
-
-#define SXSDMAN_BLUETOOTH_ENABLE
-
-static struct ion_platform_data imx_ion_data = {
-	.nr = 1,
-	.heaps = {
-		{
-		.id = 0,
-		.type = ION_HEAP_TYPE_CARVEOUT,
-		.name = "vpu_ion",
-		.size = SZ_16M,
-		.cacheable = 1,
-		},
-	},
-};
 
 static iomux_v3_cfg_t mx6sl_brd_csi_enable_pads[] = {
 	MX6SL_PAD_EPDC_GDRL__CSI_MCLK,
@@ -128,16 +108,6 @@ static iomux_v3_cfg_t mx6sl_brd_csi_enable_pads[] = {
 	MX6SL_PAD_EPDC_SDOE__GPIO_1_25,		/* CMOS_PWDN GPIO */
 };
 
-#ifdef SXSDMAN_BLUETOOTH_ENABLE
-static iomux_v3_cfg_t mx6sl_uart4_pads[] = {
-	MX6SL_PAD_SD1_DAT4__UART4_RXD,
-	MX6SL_PAD_SD1_DAT5__UART4_TXD,
-	MX6SL_PAD_SD1_DAT6__UART4_RTS,
-	MX6SL_PAD_SD1_DAT7__UART4_CTS,
-	/* gpio for reset */
-	MX6SL_PAD_SD1_DAT0__GPIO_5_11,
-};
-#else
 /* uart2 pins */
 static iomux_v3_cfg_t mx6sl_uart2_pads[] = {
 	MX6SL_PAD_SD2_DAT5__UART2_TXD,
@@ -145,18 +115,11 @@ static iomux_v3_cfg_t mx6sl_uart2_pads[] = {
 	MX6SL_PAD_SD2_DAT6__UART2_RTS,
 	MX6SL_PAD_SD2_DAT7__UART2_CTS,
 };
-#endif
 
 enum sd_pad_mode {
 	SD_PAD_MODE_LOW_SPEED,
 	SD_PAD_MODE_MED_SPEED,
 	SD_PAD_MODE_HIGH_SPEED,
-};
-
-static const struct pm_platform_data mx6sl_evk_pm_data __initconst = {
-	.name		= "imx_pm",
-	.suspend_enter = mx6sl_evk_suspend_enter,
-	.suspend_exit = mx6sl_evk_suspend_exit,
 };
 
 static int __init csi_setup(char *__unused)
@@ -247,14 +210,12 @@ static const struct esdhc_platform_data mx6_evk_sd1_data __initconst = {
 };
 
 static const struct esdhc_platform_data mx6_evk_sd2_data __initconst = {
-	.always_present = 1,
 	.cd_gpio		= MX6_BRD_SD2_CD,
 	.wp_gpio		= MX6_BRD_SD2_WP,
 	.keep_power_at_suspend	= 1,
 	.delay_line		= 0,
 	.support_18v		= 1,
 	.platform_pad_change = plt_sd_pad_change,
-	.cd_type = ESDHC_CD_PERMANENT,
 };
 
 static const struct esdhc_platform_data mx6_evk_sd3_data __initconst = {
@@ -394,13 +355,13 @@ static struct platform_device max17135_sensor_device = {
 
 static struct max17135_platform_data max17135_pdata __initdata = {
 	.vneg_pwrup = 1,
-	.gvee_pwrup = 2,
-	.vpos_pwrup = 10,
-	.gvdd_pwrup = 12,
+	.gvee_pwrup = 1,
+	.vpos_pwrup = 2,
+	.gvdd_pwrup = 1,
 	.gvdd_pwrdn = 1,
 	.vpos_pwrdn = 2,
-	.gvee_pwrdn = 8,
-	.vneg_pwrdn = 10,
+	.gvee_pwrdn = 1,
+	.vneg_pwrdn = 1,
 	.gpio_pmic_pwrgood = MX6SL_BRD_EPDC_PWRSTAT,
 	.gpio_pmic_vcom_ctrl = MX6SL_BRD_EPDC_VCOM,
 	.gpio_pmic_wakeup = MX6SL_BRD_EPDC_PMIC_WAKE,
@@ -530,6 +491,10 @@ static struct platform_device mx6_sabresd_audio_wm8962_device = {
 	.name = "imx-wm8962",
 };
 
+static struct wm8962_pdata wm8962_config_data = {
+
+};
+
 static int wm8962_clk_enable(int enable)
 {
 	if (enable)
@@ -539,10 +504,6 @@ static int wm8962_clk_enable(int enable)
 
 	return 0;
 }
-
-static struct wm8962_pdata wm8962_config_data = {
-	.clock_enable = wm8962_clk_enable,
-};
 
 static int mxc_wm8962_init(void)
 {
@@ -653,13 +614,14 @@ static struct mxc_spdif_platform_data mxc_spdif_data = {
 	.spdif_clk		= NULL,
 };
 
-int hdmi_enabled;
-static int __init hdmi_setup(char *__unused)
-{
-	hdmi_enabled = 1;
-	return 1;
-}
-__setup("hdmi", hdmi_setup);
+
+enum DISPLAY_PANEL_MODE {
+	PANEL_MODE_LCD,
+	PANEL_MODE_HDMI,
+	PANEL_MODE_EINK,
+};
+
+static int display_panel_mode = PANEL_MODE_EINK;
 
 static iomux_v3_cfg_t mx6sl_sii902x_hdmi_pads_enabled[] = {
 	MX6SL_PAD_LCD_RESET__GPIO_2_19,
@@ -702,21 +664,6 @@ static struct fsl_mxc_lcd_platform_data sii902x_hdmi_data = {
        .reset = sii902x_hdmi_reset,
        .get_pins = sii902x_get_pins,
        .put_pins = sii902x_put_pins,
-};
-
-static void seiko_wvga_enable_pins(void)
-{
-	gpio_set_value(MX6_BRD_LCD_PWR_EN, 1);
-}
-
-static void seiko_wvga_disable_pins(void)
-{
-	gpio_set_value(MX6_BRD_LCD_PWR_EN, 0);
-}
-
-static struct fsl_mxc_lcd_platform_data seiko_wvga_data = {
-       .enable_pins = seiko_wvga_enable_pins,
-       .disable_pins = seiko_wvga_disable_pins,
 };
 
 static void mx6sl_csi_io_init(void)
@@ -773,10 +720,10 @@ static struct imxi2c_platform_data mx6_evk_i2c2_data = {
 
 static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
 	{
-		I2C_BOARD_INFO("max17135", 0x48),
+		I2C_BOARD_INFO("max17135", 0), /*0x48*/
 		.platform_data = &max17135_pdata,
 	}, {
-		I2C_BOARD_INFO("elan-touch", 0x10),
+		I2C_BOARD_INFO("elan-touch", 0), /*0x10*/
 		.irq = gpio_to_irq(MX6SL_BRD_ELAN_INT),
 	}, {
 		I2C_BOARD_INFO("mma8450", 0x1c),
@@ -789,7 +736,7 @@ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
 		.platform_data = &wm8962_config_data,
 	},
 	{
-		I2C_BOARD_INFO("sii902x", 0),
+		I2C_BOARD_INFO("sii902x", 0), /*0x39*/
 		.platform_data = &sii902x_hdmi_data,
 		.irq = gpio_to_irq(MX6SL_BRD_EPDC_PWRCTRL3)
 	},
@@ -803,8 +750,14 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
 };
 
 static struct mxc_dvfs_platform_data mx6sl_evk_dvfscore_data = {
+#ifdef CONFIG_MX6_INTER_LDO_BYPASS
 	.reg_id			= "VDDCORE",
 	.soc_id			= "VDDSOC",
+#else
+	.reg_id			= "cpu_vddgp",
+	.soc_id			= "cpu_vddsoc",
+	.pu_id			= "cpu_vddvpu",
+#endif
 	.clk1_id		= "cpu_clk",
 	.clk2_id		= "gpc_dvfs_clk",
 	.gpc_cntr_offset	= MXC_GPC_CNTR_OFFSET,
@@ -832,19 +785,11 @@ static struct viv_gpu_platform_data imx6q_gpu_pdata __initdata = {
 
 void __init early_console_setup(unsigned long base, struct clk *clk);
 
-#ifdef SXSDMAN_BLUETOOTH_ENABLE
-static const struct imxuart_platform_data mx6sl_evk_uart4_data __initconst = {
-	.flags      = IMXUART_HAVE_RTSCTS,
-	.dma_req_rx = MX6Q_DMA_REQ_UART4_RX,
-	.dma_req_tx = MX6Q_DMA_REQ_UART4_TX,
-};
-#else
 static const struct imxuart_platform_data mx6sl_evk_uart1_data __initconst = {
 	.flags      = IMXUART_HAVE_RTSCTS | IMXUART_SDMA,
 	.dma_req_rx = MX6Q_DMA_REQ_UART2_RX,
 	.dma_req_tx = MX6Q_DMA_REQ_UART2_TX,
 };
-#endif
 
 static inline void mx6_evk_init_uart(void)
 {
@@ -1286,14 +1231,6 @@ static void imx6_evk_usbotg_vbus(bool on)
 		gpio_set_value(MX6_BRD_USBOTG1_PWR, 0);
 }
 
-static void imx6_evk_usbh1_vbus(bool on)
-{
-	if (on)
-		gpio_set_value(MX6_BRD_USBOTG2_PWR, 1);
-	else
-		gpio_set_value(MX6_BRD_USBOTG2_PWR, 0);
-}
-
 static void __init mx6_evk_init_usb(void)
 {
 	int ret = 0;
@@ -1316,40 +1253,19 @@ static void __init mx6_evk_init_usb(void)
 		pr_err("failed to get GPIO MX6_BRD_USBOTG2_PWR:%d\n", ret);
 		return;
 	}
-	gpio_direction_output(MX6_BRD_USBOTG2_PWR, 0);
+	gpio_direction_output(MX6_BRD_USBOTG2_PWR, 1);
 
 	mx6_set_otghost_vbus_func(imx6_evk_usbotg_vbus);
-	mx6_set_host1_vbus_func(imx6_evk_usbh1_vbus);
-
 #ifdef CONFIG_USB_EHCI_ARC_HSIC
 	mx6_usb_h2_init();
 #endif
-}
-
-static int seiko_wvga_check_fb(struct device *dev, struct fb_info *fbi)
-{
-	struct backlight_device *bd = dev_get_drvdata(dev);
-	struct fb_event *ev = bd->fb_event;
-	int fb_blank = *(int *)ev->data;
-
-	/*
-	 * The panel's spec mentions that backlight needs to
-	 * be turned on after display enable pin and fb are
-	 * active at least for 170ms(10 frames).
-	 * It is safe to use 200ms here.
-	 */
-	if (fb_blank == FB_BLANK_UNBLANK)
-		msleep(200);
-
-	return 1;
 }
 
 static struct platform_pwm_backlight_data mx6_evk_pwm_backlight_data = {
 	.pwm_id		= 0,
 	.max_brightness	= 255,
 	.dft_brightness	= 128,
-	.pwm_period_ns	= 1000000,
-	.check_fb = seiko_wvga_check_fb,
+	.pwm_period_ns	= 50000,
 };
 static struct fb_videomode wvga_video_modes[] = {
 	{
@@ -1366,14 +1282,12 @@ static struct mxc_fb_platform_data wvga_fb_data[] = {
 	 .mode_str = "SEIKO-WVGA",
 	 .mode = wvga_video_modes,
 	 .num_modes = ARRAY_SIZE(wvga_video_modes),
+	 .panel_type = "lcd",
 	 },
 };
 
 static struct platform_device lcd_wvga_device = {
 	.name = "lcd_seiko",
-	.dev = {
-		.platform_data = &seiko_wvga_data,
-	},
 };
 
 static struct fb_videomode hdmi_video_modes[] = {
@@ -1391,29 +1305,30 @@ static struct mxc_fb_platform_data hdmi_fb_data[] = {
 	 .mode_str = "1920x1080M@60",
 	 .mode = hdmi_video_modes,
 	 .num_modes = ARRAY_SIZE(hdmi_video_modes),
+	 .panel_type = "hdmi",
 	 },
 };
 
 static int mx6sl_evk_keymap[] = {
-	KEY(0, 0, KEY_VOLUMEUP),
-	KEY(0, 1, KEY_VOLUMEDOWN),
-	KEY(0, 2, KEY_RIGHT),
-	KEY(0, 3, KEY_F2),
+	KEY(0, 0, KEY_SELECT),     /* EVK:SW6        DC2:SELECT */
+	KEY(0, 1, KEY_BACK),       /* EVK:SW7        DC2:BACK	*/
+	KEY(0, 2, KEY_F1),         /* EVK:SW8        DC2:F1	*/
+	KEY(0, 3, KEY_F2),         /* EVK            DC2:F2	*/
 
-	KEY(1, 0, KEY_LEFT),
-	KEY(1, 1, KEY_UP),
-	KEY(1, 2, KEY_POWER),
-	KEY(1, 3, KEY_MENU),
+	KEY(1, 0, KEY_F3),         /* EVK:SW9        DC2:F3	*/
+	KEY(1, 1, KEY_VOLUMEDOWN), /* EVK:SW10       DC2:F4	*/
+	KEY(1, 2, KEY_VOLUMEUP),   /* EVK:SW11       DC2:F5	*/
+	KEY(1, 3, KEY_MENU),       /* EVK            DC2:MENU	*/
 
-	KEY(2, 0, KEY_BACK),
-	KEY(2, 1, KEY_DOWN),
-	KEY(2, 2, KEY_HOME),
-	KEY(2, 3, KEY_NEXT),
+	KEY(2, 0, KEY_PREVIOUS),   /* EVK:SW12       DC2:PREV	*/
+	KEY(2, 1, KEY_NEXT),       /* EVK:SW13       DC2:NEX1	*/
+	KEY(2, 2, KEY_HOME),       /* EVK            DC2:HOME	*/
+	KEY(2, 3, KEY_NEXT),       /* EVK            DC2:NEX2	*/
 
-	KEY(3, 0, KEY_UP),
-	KEY(3, 1, KEY_LEFT),
-	KEY(3, 2, KEY_RIGHT),
-	KEY(3, 3, KEY_DOWN),
+	KEY(3, 0, KEY_UP),         /* EVK            DC2:UP	*/
+	KEY(3, 1, KEY_LEFT),       /* EVK            DC2:LEFT	*/
+	KEY(3, 2, KEY_RIGHT),      /* EVK            DC2:RIGHT	*/
+	KEY(3, 3, KEY_DOWN),       /* EVK            DC2:DOWN	*/
 };
 
 static const struct matrix_keymap_data mx6sl_evk_map_data __initconst = {
@@ -1484,22 +1399,6 @@ static void mx6_snvs_poweroff(void)
 	writel(value | 0x60, mx6_snvs_base + SNVS_LPCR);
 }
 
-#ifdef SXSDMAN_BLUETOOTH_ENABLE
-static int uart4_enabled;
-static int __init uart4_setup(char * __unused)
-{
-	uart4_enabled = 1;
-	return 1;
-}
-__setup("bluetooth", uart4_setup);
-
-static void __init uart4_init(void)
-{
-	mxc_iomux_v3_setup_multiple_pads(mx6sl_uart4_pads,
-					ARRAY_SIZE(mx6sl_uart4_pads));
-	imx6sl_add_imx_uart(3, &mx6sl_evk_uart4_data);
-}
-#else
 static int uart2_enabled;
 static int __init uart2_setup(char * __unused)
 {
@@ -1514,61 +1413,51 @@ static void __init uart2_init(void)
 					ARRAY_SIZE(mx6sl_uart2_pads));
 	imx6sl_add_imx_uart(1, &mx6sl_evk_uart1_data);
 }
+
+
+#if defined(CONFIG_KEYBOARD_GPIO) || defined(CONFIG_KEYBOARD_GPIO_MODULE)
+
+#define MX6SL_EVK_POWER_OFF	IMX_GPIO_NR(3, 18)
+
+#define GPIO_BUTTON(gpio_num, ev_code, act_low, descr, wake, debounce)	\
+{								\
+	.gpio		= gpio_num,				\
+	.type		= EV_KEY,				\
+	.code		= ev_code,				\
+	.active_low	= act_low,				\
+	.desc		= "btn " descr,				\
+	.wakeup		= wake,					\
+	.debounce_interval = debounce,				\
+}
+
+static struct gpio_keys_button imx6sl_buttons[] = {
+	GPIO_BUTTON(MX6SL_EVK_POWER_OFF, KEY_POWER, 1, "power", 1, 1),
+};
+
+static struct gpio_keys_platform_data imx6sl_button_data = {
+	.buttons	= imx6sl_buttons,
+	.nbuttons	= ARRAY_SIZE(imx6sl_buttons),
+	.rep            = 0,
+};
+
+static struct platform_device imx6sl_button_device = {
+	.name		= "gpio-keys",
+	.id		= -1,
+	.num_resources  = 0,
+	.dev		= {
+		.platform_data = &imx6sl_button_data,
+	}
+};
+
+static void __init imx6sl_add_device_buttons(void)
+{
+	platform_device_register(&imx6sl_button_device);
+}
+#else
+static void __init imx6sl_add_device_buttons(void) {}
 #endif
 
-static void mx6sl_evk_bt_reset(void)
-{
-	gpio_request(MX6SL_BRD_BT_RESET, "bt-reset");
-	gpio_direction_output(MX6SL_BRD_BT_RESET, 0);
-	/* pull down reset pin at least >5ms */
-	mdelay(6);
-	/* pull up after power supply BT */
-	gpio_set_value(MX6SL_BRD_BT_RESET, 1);
-	gpio_free(MX6SL_BRD_BT_RESET);
-}
 
-static int mx6sl_evk_bt_power_change(int status)
-{
-	if (status)
-		mx6sl_evk_bt_reset();
-	return 0;
-}
-
-static struct platform_device mxc_bt_rfkill = {
-	.name = "mxc_bt_rfkill",
-};
-
-static struct imx_bt_rfkill_platform_data mxc_bt_rfkill_data = {
-	.power_change = mx6sl_evk_bt_power_change,
-};
-
-static void mx6sl_evk_suspend_enter()
-{
-	iomux_v3_cfg_t *p = suspend_enter_pads;
-	int i;
-
-	/* Set PADCTRL to 0 for all IOMUX. */
-	for (i = 0; i < ARRAY_SIZE(suspend_enter_pads); i++) {
-		suspend_exit_pads[i] = *p;
-		*p &= ~MUX_PAD_CTRL_MASK;
-		/* Enable the Pull down and the keeper
-		  * Set the drive strength to 0.
-		  */
-		*p |= ((u64)0x3000 << MUX_PAD_CTRL_SHIFT);
-		p++;
-	}
-	mxc_iomux_v3_get_multiple_pads(suspend_exit_pads,
-			ARRAY_SIZE(suspend_exit_pads));
-	mxc_iomux_v3_setup_multiple_pads(suspend_enter_pads,
-			ARRAY_SIZE(suspend_enter_pads));
-
-}
-
-static void mx6sl_evk_suspend_exit()
-{
-	mxc_iomux_v3_setup_multiple_pads(suspend_exit_pads,
-			ARRAY_SIZE(suspend_exit_pads));
-}
 
 /*!
  * Board specific initialization.
@@ -1580,31 +1469,70 @@ static void __init mx6_evk_init(void)
 	mxc_iomux_v3_setup_multiple_pads(mx6sl_brd_pads,
 					ARRAY_SIZE(mx6sl_brd_pads));
 
-	elan_ts_init();
-
+#ifdef CONFIG_MX6_INTER_LDO_BYPASS
 	gp_reg_id = mx6sl_evk_dvfscore_data.reg_id;
 	soc_reg_id = mx6sl_evk_dvfscore_data.soc_id;
+#else
+	gp_reg_id = mx6sl_evk_dvfscore_data.reg_id;
+	soc_reg_id = mx6sl_evk_dvfscore_data.soc_id;
+	pu_reg_id = mx6sl_evk_dvfscore_data.pu_id;
+	mx6_cpu_regulator_init();
+#endif
 
 	imx6q_add_imx_snvs_rtc();
 
 	imx6q_add_imx_i2c(0, &mx6_evk_i2c0_data);
 	imx6q_add_imx_i2c(1, &mx6_evk_i2c1_data);
-	i2c_register_board_info(0, mxc_i2c0_board_info,
-			ARRAY_SIZE(mxc_i2c0_board_info));
 
 	/*  setting sii902x address when hdmi enabled */
-	if (hdmi_enabled) {
-		for (i = 0; i < ARRAY_SIZE(mxc_i2c1_board_info); i++) {
-			if (!strcmp(mxc_i2c1_board_info[i].type, "sii902x")) {
+	switch (display_panel_mode) {
+	case PANEL_MODE_EINK:
+		for (i = 0; i < ARRAY_SIZE(mxc_i2c0_board_info); i++)
+			if (!strcmp(mxc_i2c0_board_info[i].type, "max17135"))
+				mxc_i2c0_board_info[i].addr = 0x48;
+		for (i = 0; i < ARRAY_SIZE(mxc_i2c0_board_info); i++)
+			if (!strcmp(mxc_i2c0_board_info[i].type, "elan-touch"))
+				mxc_i2c0_board_info[i].addr = 0x10;
+		elan_ts_init();
+		mxc_register_device(&max17135_sensor_device, NULL);
+		setup_spdc();
+		if (!spdc_sel)
+			imx6dl_add_imx_epdc(&epdc_data);
+		else
+			imx6sl_add_imx_spdc(&spdc_data);
+		break;
+	case PANEL_MODE_HDMI:
+		for (i = 0; i < ARRAY_SIZE(mxc_i2c1_board_info); i++)
+			if (!strcmp(mxc_i2c1_board_info[i].type, "sii902x"))
 				mxc_i2c1_board_info[i].addr = 0x39;
-				break;
-			}
-		}
+#ifdef CONFIG_IMX_HAVE_PLATFORM_IMX_ELCDIF//[		
+		imx6dl_add_imx_elcdif(&hdmi_fb_data[0]);
+#endif //]CONFIG_IMX_HAVE_PLATFORM_IMX_ELCDIF
+		mxc_spdif_data.spdif_core_clk = clk_get_sys("mxc_spdif.0",
+								NULL);
+		clk_put(mxc_spdif_data.spdif_core_clk);
+		imx6q_add_spdif(&mxc_spdif_data);
+		imx6q_add_spdif_dai();
+		imx6q_add_spdif_audio_device();
+		break;
+	case PANEL_MODE_LCD:
+#ifdef CONFIG_IMX_HAVE_PLATFORM_IMX_ELCDIF//[		
+		imx6dl_add_imx_elcdif(&wvga_fb_data[0]);
+#endif //]CONFIG_IMX_HAVE_PLATFORM_IMX_ELCDIF
+		gpio_request(MX6_BRD_LCD_PWR_EN, "elcdif-power-on");
+		gpio_direction_output(MX6_BRD_LCD_PWR_EN, 1);
+		mxc_register_device(&lcd_wvga_device, NULL);
+		break;
+	default:
+		pr_err("Error display_panel_mode\n");
 	}
 
+	i2c_register_board_info(0, mxc_i2c0_board_info,
+			ARRAY_SIZE(mxc_i2c0_board_info));
 	i2c_register_board_info(1, mxc_i2c1_board_info,
 			ARRAY_SIZE(mxc_i2c1_board_info));
-	/* only camera on I2C3, that's why we can do so */
+
+	/* only camera on I2C2, that's why we can do so */
 	if (csi_enabled == 1) {
 		mxc_register_device(&csi_v4l2_devices, NULL);
 		imx6q_add_imx_i2c(2, &mx6_evk_i2c2_data);
@@ -1638,59 +1566,40 @@ static void __init mx6_evk_init(void)
 	imx6q_add_otp();
 	imx6q_add_mxc_pwm(0);
 	imx6q_add_mxc_pwm_backlight(0, &mx6_evk_pwm_backlight_data);
-
-	if (hdmi_enabled) {
-		imx6dl_add_imx_elcdif(&hdmi_fb_data[0]);
-	} else {
+#ifdef CONFIG_IMX_HAVE_PLATFORM_IMX_ELCDIF//[
 		imx6dl_add_imx_elcdif(&wvga_fb_data[0]);
+#endif //] CONFIG_IMX_HAVE_PLATFORM_IMX_ELCDIF
 
 		gpio_request(MX6_BRD_LCD_PWR_EN, "elcdif-power-on");
 		gpio_direction_output(MX6_BRD_LCD_PWR_EN, 1);
-		platform_device_register(&lcd_wvga_device);
-	}
+		mxc_register_device(&lcd_wvga_device, NULL);
 
 	imx6dl_add_imx_pxp();
 	imx6dl_add_imx_pxp_client();
-	mxc_register_device(&max17135_sensor_device, NULL);
-	setup_spdc();
+
 	if (csi_enabled) {
 		imx6sl_add_fsl_csi();
-	} else  {
-		if (!spdc_sel)
-			imx6dl_add_imx_epdc(&epdc_data);
-		else
-			imx6sl_add_imx_spdc(&spdc_data);
 	}
 	imx6q_add_dvfs_core(&mx6sl_evk_dvfscore_data);
 
 	imx6q_init_audio();
 
 	/* uart2 for bluetooth */
-#ifdef SXSDMAN_BLUETOOTH_ENABLE
-	if (uart4_enabled)
-		uart4_init();
-#else
 	if (uart2_enabled)
 		uart2_init();
-#endif
 
-	mxc_register_device(&mxc_bt_rfkill, &mxc_bt_rfkill_data);
+	//mxc_register_device(&mxc_bt_rfkill, &mxc_bt_rfkill_data);
 
 	imx6q_add_viim();
 	imx6q_add_imx2_wdt(0, NULL);
 
 	imx_add_viv_gpu(&imx6_gpu_data, &imx6q_gpu_pdata);
+	imx6sl_add_device_buttons();
 	imx6sl_add_imx_keypad(&mx6sl_evk_map_data);
 	imx6q_add_busfreq();
 	imx6sl_add_dcp();
 	imx6sl_add_rngb();
 	imx6sl_add_imx_pxp_v4l2();
-
-	mxc_spdif_data.spdif_core_clk = clk_get_sys("mxc_spdif.0", NULL);
-	clk_put(mxc_spdif_data.spdif_core_clk);
-	imx6q_add_spdif(&mxc_spdif_data);
-	imx6q_add_spdif_dai();
-	imx6q_add_spdif_audio_device();
 
 	imx6q_add_perfmon(0);
 	imx6q_add_perfmon(1);
@@ -1698,12 +1607,6 @@ static void __init mx6_evk_init(void)
 	/* Register charger chips */
 	platform_device_register(&evk_max8903_charger_1);
 	pm_power_off = mx6_snvs_poweroff;
-	imx6q_add_pm_imx(0, &mx6sl_evk_pm_data);
-
-	if (imx_ion_data.heaps[0].size)
-		platform_device_register_resndata(NULL, "ion-mxc", 0, NULL, 0, \
-		&imx_ion_data, sizeof(imx_ion_data) + sizeof(struct ion_platform_heap));
-
 }
 
 extern void __iomem *twd_base;
@@ -1736,15 +1639,28 @@ static void __init mx6_evk_reserve(void)
 		imx6q_gpu_pdata.reserved_mem_base = phys;
 	}
 #endif
-
-#if defined(CONFIG_ION)
-	if (imx_ion_data.heaps[0].size) {
-		phys = memblock_alloc(imx_ion_data.heaps[0].size, SZ_4K);
-		memblock_remove(phys, imx_ion_data.heaps[0].size);
-		imx_ion_data.heaps[0].base = phys;
-	}
-#endif
 }
+
+static int __init display_panel_setup(char *options)
+{
+	if (!options || !*options) {
+		pr_err("Error panel options\n");
+		return 0;
+	}
+
+	if (!strcmp(options, "lcd"))
+		display_panel_mode = PANEL_MODE_LCD;
+	else if (!strcmp(options, "hdmi"))
+		display_panel_mode = PANEL_MODE_HDMI;
+	else if (!strcmp(options, "eink"))
+		display_panel_mode = PANEL_MODE_EINK;
+	else
+		pr_warn("WARN: invalid display panel mode setting");
+
+	return 1;
+}
+
+__setup("panel=", display_panel_setup);
 
 MACHINE_START(MX6SL_EVK, "Freescale i.MX 6SoloLite EVK Board")
 	.boot_params	= MX6SL_PHYS_OFFSET + 0x100,

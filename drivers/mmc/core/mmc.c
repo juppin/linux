@@ -259,13 +259,15 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 	}
 
 	card->ext_csd.rev = ext_csd[EXT_CSD_REV];
-	/* workaround: support emmc 4.5 cards to work at emmc 4.4 mode */
-	if (card->ext_csd.rev > 6) {
+#if 0
+	/* workaround: support emmc 5.1 cards to work at emmc 4.4 mode */
+	if (card->ext_csd.rev > 7) {
 		printk(KERN_ERR "%s: unrecognised EXT_CSD revision %d\n",
 			mmc_hostname(card->host), card->ext_csd.rev);
 		err = -EINVAL;
 		goto out;
 	}
+#endif
 
 	card->ext_csd.raw_sectors[0] = ext_csd[EXT_CSD_SEC_CNT + 0];
 	card->ext_csd.raw_sectors[1] = ext_csd[EXT_CSD_SEC_CNT + 1];
@@ -1300,6 +1302,7 @@ static int mmc_resume(struct mmc_host *host)
 	BUG_ON(!host->card);
 
 	mmc_claim_host(host);
+	err = mmc_send_op_cond(host, 0, 0);
 	err = mmc_init_card(host, host->ocr, host->card);
 	mmc_release_host(host);
 

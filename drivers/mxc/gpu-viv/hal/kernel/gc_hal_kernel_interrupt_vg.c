@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*    Copyright (C) 2005 - 2013 by Vivante Corp.
+*    Copyright (C) 2005 - 2012 by Vivante Corp.
 *
 *    This program is free software; you can redistribute it and/or modify
 *    it under the terms of the GNU General Public License as published by
@@ -17,6 +17,8 @@
 *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 *
 *****************************************************************************/
+
+
 
 
 #include "gc_hal_kernel_precomp.h"
@@ -793,9 +795,6 @@ gckVGINTERRUPT_Enque(
         gcmkERR_BREAK(gckVGHARDWARE_ReadInterrupt(
             Interrupt->kernel->hardware, &triggered
             ));
-
-        /* Mask out TS overflow interrupt */
-        triggered &= 0xfffffffe;
 
         /* No interrupts to process? */
         if (triggered == 0)

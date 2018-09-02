@@ -66,6 +66,7 @@
 #define LOCAL_TWD_COUNT_OFFSET		0x4
 #define LOCAL_TWD_CONTROL_OFFSET	0x8
 #define LOCAL_TWD_INT_OFFSET		0xc
+#define ANATOP_REG_1P1_OFFSET		0x110
 #define ANATOP_REG_2P5_OFFSET		0x130
 #define ANATOP_REG_CORE_OFFSET		0x140
 #define VDD3P0_VOLTAGE                   3200000
@@ -85,8 +86,11 @@ extern int set_cpu_freq(int wp);
 extern void mx6_suspend(suspend_state_t state);
 extern void mx6_init_irq(void);
 extern unsigned int gpc_wake_irq[4];
-
 extern bool enable_wait_mode;
+extern unsigned long save_ttbr1(void);
+extern void restore_ttbr1(u32 ttbr1);
+
+
 static struct device *pm_dev;
 struct clk *gpc_dvfs_clk;
 static void __iomem *scu_base;
@@ -97,18 +101,20 @@ static void __iomem *gic_dist_base;
 static void __iomem *gic_cpu_base;
 static void __iomem *anatop_base;
 
-static void *suspend_iram_base;
 static void (*suspend_in_iram)(suspend_state_t state,
 	unsigned long iram_paddr, unsigned long suspend_iram_base, unsigned int cpu_type) = NULL;
-static unsigned long iram_paddr, cpaddr;
+static unsigned long cpaddr;
 
 static u32 ccm_ccr, ccm_clpcr, scu_ctrl;
 static u32 gpc_imr[4], gpc_cpu_pup, gpc_cpu_pdn, gpc_cpu, gpc_ctr, gpc_disp;
-static u32 anatop[2], ccgr1, ccgr2, ccgr3, ccgr6;
+static u32 anatop[3], ccgr1, ccgr2, ccgr3, ccgr6;
 static u32 ccm_analog_pfd528;
 static u32 ccm_analog_pll3_480;
 static u32 ccm_anadig_ana_misc2;
 static bool usb_vbus_wakeup_enabled;
+
+void *suspend_iram_base;
+unsigned long suspend_iram_phys_addr;
 
 /*
  * The USB VBUS wakeup should be disabled to avoid vbus wake system
@@ -240,6 +246,7 @@ static void mx6_suspend_store(void)
 		gpc_disp = __raw_readl(gpc_base + GPC_PGC_DISP_PGCR_OFFSET);
 	anatop[0] = __raw_readl(anatop_base + ANATOP_REG_2P5_OFFSET);
 	anatop[1] = __raw_readl(anatop_base + ANATOP_REG_CORE_OFFSET);
+	anatop[2] = __raw_readl(anatop_base + ANATOP_REG_1P1_OFFSET);
 }
 
 static void mx6_suspend_restore(void)
@@ -247,6 +254,7 @@ static void mx6_suspend_restore(void)
 	/* restore settings after suspend */
 	__raw_writel(anatop[0], anatop_base + ANATOP_REG_2P5_OFFSET);
 	__raw_writel(anatop[1], anatop_base + ANATOP_REG_CORE_OFFSET);
+	__raw_writel(anatop[2], anatop_base + ANATOP_REG_1P1_OFFSET);
 	/* Per spec, the count needs to be zeroed and reconfigured on exit from
 	 * low power mode
 	 */
@@ -274,6 +282,7 @@ static void mx6_suspend_restore(void)
 	__raw_writel(ccm_anadig_ana_misc2, MXC_PLL_BASE + HW_ANADIG_ANA_MISC2);
 }
 
+extern int ntx_check_suspend (void);
 static int mx6_suspend_enter(suspend_state_t state)
 {
 	unsigned int wake_irq_isr[4];
@@ -305,6 +314,8 @@ static int mx6_suspend_enter(suspend_state_t state)
 				wake_irq_isr[2], wake_irq_isr[3]);
 		return 0;
 	}
+	if (ntx_check_suspend())
+		return 0;
 	mx6_suspend_store();
 
 	/*
@@ -346,8 +357,8 @@ static int mx6_suspend_enter(suspend_state_t state)
 	__raw_writel(__raw_readl(IOMUXC_GPR1) | (1 << 18), IOMUXC_GPR1);
 
 	if (state == PM_SUSPEND_MEM || state == PM_SUSPEND_STANDBY) {
+		u32 ttbr1;
 
-		local_flush_tlb_all();
 		flush_cache_all();
 
 		if (arm_pg) {
@@ -359,8 +370,10 @@ static int mx6_suspend_enter(suspend_state_t state)
 		if (pm_data && pm_data->suspend_enter)
 			pm_data->suspend_enter();
 
-		suspend_in_iram(state, (unsigned long)iram_paddr,
+		ttbr1 = save_ttbr1();
+		suspend_in_iram(state, (unsigned long)suspend_iram_phys_addr,
 			(unsigned long)suspend_iram_base, cpu_type);
+		restore_ttbr1(ttbr1);
 
 		if (pm_data && pm_data->suspend_exit)
 			pm_data->suspend_exit();
@@ -506,12 +519,12 @@ static int __init pm_init(void)
 	}
 
 	suspend_set_ops(&mx6_suspend_ops);
-	/* Move suspend routine into iRAM */
-	cpaddr = (unsigned long)iram_alloc(SZ_8K, &iram_paddr);
-	/* Need to remap the area here since we want the memory region
-		 to be executable. */
-	suspend_iram_base = __arm_ioremap(iram_paddr, SZ_8K,
-					  MT_MEMORY_NONCACHED);
+	/* Use preallocated IRAM memory. */
+	suspend_iram_phys_addr = MX6_SUSPEND_IRAM_CODE;
+
+	/* Dont ioremap the address, we have fixed the IRAM address at IRAM_BASE_ADDR_VIRT */
+	suspend_iram_base = IRAM_BASE_ADDR_VIRT + (suspend_iram_phys_addr - IRAM_BASE_ADDR);
+
 	pr_info("cpaddr = %x suspend_iram_base=%x\n",
 		(unsigned int)cpaddr, (unsigned int)suspend_iram_base);
 
@@ -519,7 +532,7 @@ static int __init pm_init(void)
 	 * Need to run the suspend code from IRAM as the DDR needs
 	 * to be put into low power mode manually.
 	 */
-	memcpy((void *)cpaddr, mx6_suspend, SZ_8K);
+	memcpy((void *)suspend_iram_base, mx6_suspend, MX6_SUSPEND_CODE_SIZE);
 
 	suspend_in_iram = (void *)suspend_iram_base;
 

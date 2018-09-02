@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*    Copyright (C) 2005 - 2013 by Vivante Corp.
+*    Copyright (C) 2005 - 2012 by Vivante Corp.
 *
 *    This program is free software; you can redistribute it and/or modify
 *    it under the terms of the GNU General Public License as published by
@@ -17,6 +17,8 @@
 *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 *
 *****************************************************************************/
+
+
 
 
 #ifndef __gc_hal_kernel_h_
@@ -140,12 +142,8 @@ typedef enum _gceDATABASE_TYPE
     gcvDB_CONTEXT,                      /* Context */
     gcvDB_IDLE,                         /* GPU idle. */
     gcvDB_MAP_MEMORY,                   /* Map memory */
-    gcvDB_SHARED_INFO,                  /* Private data */
-    gcvDB_MAP_USER_MEMORY,              /* Map user memory */
-    gcvDB_SYNC_POINT,                   /* Sync point. */
-    gcvDB_VIDEO_MEMORY_RESERVED,        /* Reserved video memory */
-    gcvDB_VIDEO_MEMORY_CONTIGUOUS,      /* Contiguous video memory */
-    gcvDB_VIDEO_MEMORY_VIRTUAL,         /* Virtual video memory */
+    gcvDB_SHARED_INFO,                 /* Private data */
+    gcvDB_MAP_USER_MEMORY               /* Map user memory */
 }
 gceDATABASE_TYPE;
 
@@ -184,24 +182,18 @@ typedef struct _gcsDATABASE
     gcsDATABASE_COUNTERS                contiguous;
     gcsDATABASE_COUNTERS                mapUserMemory;
     gcsDATABASE_COUNTERS                mapMemory;
-    gcsDATABASE_COUNTERS                vidMemResv;
-    gcsDATABASE_COUNTERS                vidMemCont;
-    gcsDATABASE_COUNTERS                vidMemVirt;
 
     /* Idle time management. */
     gctUINT64                           lastIdle;
     gctUINT64                           idle;
 
     /* Pointer to database. */
-    gcsDATABASE_RECORD_PTR              list[48];
+    gcsDATABASE_RECORD_PTR              list;
 
 #if gcdSECURE_USER
     /* Secure cache. */
     gcskSECURE_CACHE                    cache;
 #endif
-
-    gctPOINTER                          handleDatabase;
-    gctPOINTER                          handleDatabaseMutex;
 }
 gcsDATABASE;
 
@@ -266,57 +258,6 @@ gckKERNEL_DumpProcessDB(
     IN gckKERNEL Kernel
     );
 
-/* ID database */
-gceSTATUS
-gckKERNEL_CreateIntegerDatabase(
-    IN gckKERNEL Kernel,
-    OUT gctPOINTER * Database
-    );
-
-gceSTATUS
-gckKERNEL_DestroyIntegerDatabase(
-    IN gckKERNEL Kernel,
-    IN gctPOINTER Database
-    );
-
-gceSTATUS
-gckKERNEL_AllocateIntegerId(
-    IN gctPOINTER Database,
-    IN gctPOINTER Pointer,
-    OUT gctUINT32 * Id
-    );
-
-gceSTATUS
-gckKERNEL_FreeIntegerId(
-    IN gctPOINTER Database,
-    IN gctUINT32 Id
-    );
-
-gceSTATUS
-gckKERNEL_QueryIntegerId(
-    IN gctPOINTER Database,
-    IN gctUINT32 Id,
-    OUT gctPOINTER * Pointer
-    );
-
-gctUINT32
-gckKERNEL_AllocateNameFromPointer(
-    IN gckKERNEL Kernel,
-    IN gctPOINTER Pointer
-    );
-
-gctPOINTER
-gckKERNEL_QueryPointerFromName(
-    IN gckKERNEL Kernel,
-    IN gctUINT32 Name
-    );
-
-gceSTATUS
-gckKERNEL_DeleteName(
-    IN gckKERNEL Kernel,
-    IN gctUINT32 Name
-    );
-
 #if gcdSECURE_USER
 /* Get secure cache from the process database. */
 gceSTATUS
@@ -356,9 +297,6 @@ struct _gckDB
     gctUINT64                   idleTime;
     gctUINT64                   lastSlowdown;
     gctUINT64                   lastSlowdownIdle;
-    /* ID - Pointer database*/
-    gctPOINTER                  pointerDatabase;
-    gctPOINTER                  pointerDatabaseMutex;
 };
 
 #if gcdVIRTUAL_COMMAND_BUFFER
@@ -413,6 +351,9 @@ struct _gckKERNEL
     /* Enable profiling */
     gctBOOL                     profileEnable;
 
+    /* The profile file name */
+    gctCHAR                     profileFileName[gcdMAX_PROFILE_FILE_NAME];
+
     /* Clear profile register or not*/
     gctBOOL                     profileCleanRegister;
 
@@ -429,7 +370,6 @@ struct _gckKERNEL
 #if gcdENABLE_RECOVERY
     gctPOINTER                  resetFlagClearTimer;
     gctPOINTER                  resetAtom;
-    gctUINT64                   resetTimeStamp;
 #endif
 
     /* Pointer to gckEVENT object. */
@@ -445,36 +385,6 @@ struct _gckKERNEL
     gckVIRTUAL_COMMAND_BUFFER_PTR virtualBufferTail;
     gctPOINTER                    virtualBufferLock;
 #endif
-
-#if gcdDVFS
-    gckDVFS                     dvfs;
-#endif
-
-#if gcdANDROID_NATIVE_FENCE_SYNC
-    gctHANDLE                   timeline;
-#endif
-
-    gctPOINTER                  vidmemMutex;
-};
-
-struct _FrequencyHistory
-{
-    gctUINT32                   frequency;
-    gctUINT32                   count;
-};
-
-/* gckDVFS object. */
-struct _gckDVFS
-{
-    gckOS                       os;
-    gckHARDWARE                 hardware;
-    gctPOINTER                  timer;
-    gctUINT32                   pollingTime;
-    gctBOOL                     stop;
-    gctUINT32                   totalConfig;
-    gctUINT32                   loads[8];
-    gctUINT8                    currentScale;
-    struct _FrequencyHistory    frequencyHistory[16];
 };
 
 /* gckCOMMAND object. */
@@ -505,11 +415,6 @@ struct _gckCOMMAND
 
     /* Context switching mutex. */
     gctPOINTER                  mutexContext;
-
-#if VIVANTE_PROFILER_CONTEXT
-    /* Context sequence mutex. */
-    gctPOINTER                  mutexContextSeq;
-#endif
 
     /* Command queue power semaphore. */
     gctPOINTER                  powerSemaphore;
@@ -664,8 +569,6 @@ struct _gckEVENT
     gctPOINTER                  eventListMutex;
 
     gctPOINTER                  submitTimer;
-
-    volatile gctBOOL            inNotify;
 };
 
 /* Free all events belonging to a process. */
@@ -683,11 +586,6 @@ gckEVENT_Stop(
     IN gctPOINTER Logical,
     IN gctSIGNAL Signal,
 	IN OUT gctSIZE_T * waitSize
-    );
-
-gceSTATUS
-gckEVENT_WaitEmpty(
-    IN gckEVENT Event
     );
 
 /* gcuVIDMEM_NODE structure. */
@@ -736,9 +634,6 @@ typedef union _gcuVIDMEM_NODE
 #if gcdDYNAMIC_MAP_RESERVED_MEMORY && gcdENABLE_VG
         gctPOINTER              kernelVirtual;
 #endif
-
-        /* Surface type. */
-        gceSURF_TYPE            type;
     }
     VidMem;
 
@@ -768,6 +663,9 @@ typedef union _gcuVIDMEM_NODE
         /* Actual physical address */
         gctUINT32               addresses[gcdMAX_GPU_COUNT];
 
+        /* Mutex. */
+        gctPOINTER              mutex;
+
         /* Locked counter. */
         gctINT32                lockeds[gcdMAX_GPU_COUNT];
 
@@ -792,9 +690,6 @@ typedef union _gcuVIDMEM_NODE
 
         /* */
         gcsVIDMEM_NODE_SHARED_INFO sharedInfo;
-
-        /* Surface type. */
-        gceSURF_TYPE            type;
     }
     Virtual;
 }
@@ -822,6 +717,9 @@ struct _gckVIDMEM
 
     /* Allocation threshold. */
     gctSIZE_T                   threshold;
+
+    /* The heap mutex. */
+    gctPOINTER                  mutex;
 
 #if gcdUSE_VIDMEM_PER_PID
     /* The Pid this VidMem belongs to. */

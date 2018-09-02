@@ -70,6 +70,11 @@ static void usb_charger_work(struct work_struct *data)
 
 	mutex_lock(&charger->lock);
 
+#ifdef CONFIG_BATTERY_RICOH619
+	msleep (500);
+	if (charger->dp_pullup)
+		charger->dp_pullup(true);
+#else
 	/* Start the primary charger detection. */
 	if (charger->detect) {
 		ret = charger->detect(charger);
@@ -96,7 +101,7 @@ static void usb_charger_work(struct work_struct *data)
 	}
 
 	power_supply_changed(&charger->psy);
-
+#endif
 	mutex_unlock(&charger->lock);
 }
 

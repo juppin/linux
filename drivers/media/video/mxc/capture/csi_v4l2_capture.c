@@ -555,7 +555,6 @@ static int csi_v4l2_prepare_bufs(cam_data *cam, struct v4l2_buffer *buf)
 static inline int valid_mode(u32 palette)
 {
 	return (palette == V4L2_PIX_FMT_RGB565) ||
-	    (palette == V4L2_PIX_FMT_YUYV) ||
 	    (palette == V4L2_PIX_FMT_UYVY) || (palette == V4L2_PIX_FMT_YUV420);
 }
 
@@ -827,21 +826,12 @@ static int csi_v4l2_s_fmt(cam_data *cam, struct v4l2_format *f)
 		switch (f->fmt.pix.pixelformat) {
 		case V4L2_PIX_FMT_RGB565:
 			size = f->fmt.pix.width * f->fmt.pix.height * 2;
-			csi_init_format(V4L2_PIX_FMT_UYVY);
 			csi_set_16bit_imagpara(f->fmt.pix.width,
 					       f->fmt.pix.height);
 			bytesperline = f->fmt.pix.width * 2;
 			break;
 		case V4L2_PIX_FMT_UYVY:
 			size = f->fmt.pix.width * f->fmt.pix.height * 2;
-			csi_init_format(f->fmt.pix.pixelformat);
-			csi_set_16bit_imagpara(f->fmt.pix.width,
-					       f->fmt.pix.height);
-			bytesperline = f->fmt.pix.width * 2;
-			break;
-		case V4L2_PIX_FMT_YUYV:
-			size = f->fmt.pix.width * f->fmt.pix.height * 2;
-			csi_init_format(f->fmt.pix.pixelformat);
 			csi_set_16bit_imagpara(f->fmt.pix.width,
 					       f->fmt.pix.height);
 			bytesperline = f->fmt.pix.width * 2;
@@ -1110,7 +1100,7 @@ static int csi_v4l_open(struct file *file)
 
 	pr_debug("   device name is %s\n", dev->name);
 
-	if (!cam || !cam->sensor) {
+	if (!cam) {
 		pr_err("ERROR: v4l2 capture: Internal error, "
 		       "cam_data not found!\n");
 		return -EBADF;
@@ -1440,12 +1430,8 @@ static long csi_v4l_do_ioctl(struct file *file,
 		}
 
 		csi_streamoff(cam);
-		if (req->memory & V4L2_MEMORY_MMAP)
-			csi_free_frame_buf(cam);
-		INIT_LIST_HEAD(&cam->ready_q);
-		INIT_LIST_HEAD(&cam->working_q);
-		INIT_LIST_HEAD(&cam->done_q);
 		if (req->memory & V4L2_MEMORY_MMAP) {
+			csi_free_frame_buf(cam);
 			retval = csi_allocate_frame_buf(cam, req->count + 1);
 			req_buf_number = req->count;
 		}

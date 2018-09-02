@@ -339,6 +339,34 @@ struct sdma_engine {
 #define SDMA_H_CONFIG_ACR	(1 << 4)  /* indicates if AHB freq /core freq = 2 or 1 */
 #define SDMA_H_CONFIG_CSM	(3)       /* indicates which context switch mode is selected*/
 
+#ifdef CONFIG_SDMA_IRAM
+static unsigned long sdma_iram_paddr;
+static void *sdma_iram_vaddr;
+#define sdma_iram_phys_to_virt(p) (sdma_iram_vaddr + ((p) - sdma_iram_paddr))
+#define sdma_iram_virt_to_phys(v) (sdma_iram_paddr + ((v) - sdma_iram_vaddr))
+static struct gen_pool *sdma_iram_pool;
+
+/*!
+ * Allocates uncacheable buffer from IRAM
+ */
+void __iomem *sdma_iram_malloc(size_t size, unsigned long *buf)
+{
+	*buf = gen_pool_alloc(sdma_iram_pool, size);
+	if (!buf)
+		return NULL;
+
+	return sdma_iram_phys_to_virt(*buf);
+}
+
+void sdma_iram_free(unsigned long *buf, u32 size)
+{
+	if (!sdma_iram_pool)
+		return;
+
+	gen_pool_free(sdma_iram_pool, buf, size);
+}
+#endif				/*CONFIG_SDMA_IRAM */
+
 
 static inline u32 chnenbl_ofs(struct sdma_engine *sdma, unsigned int event)
 {
@@ -421,7 +449,7 @@ static int sdma_load_script(struct sdma_engine *sdma, void *buf, int size,
 	int ret;
 
 #ifdef CONFIG_SDMA_IRAM
-	buf_virt = iram_alloc(size, (unsigned long *)&buf_phys);
+	buf_virt = sdma_iram_malloc(size, (unsigned long)&buf_phys);
 #else
 	buf_virt = dma_alloc_coherent(NULL,
 			size,
@@ -444,7 +472,7 @@ static int sdma_load_script(struct sdma_engine *sdma, void *buf, int size,
 
 	spin_unlock_irqrestore(&sdma->channel_0_lock, flags);
 #ifdef CONFIG_SDMA_IRAM
-	iram_free(buf_phys, size);
+	sdma_iram_free(buf_phys, size);
 #else
 	dma_free_coherent(NULL, size, buf_virt, buf_phys);
 #endif
@@ -910,9 +938,10 @@ static int sdma_request_channel(struct sdma_channel *sdmac)
 	int ret = -EBUSY;
 
 #ifdef CONFIG_SDMA_IRAM
-	sdmac->bd = iram_alloc(PAGE_SIZE, (unsigned long *)&sdmac->bd_phys);
+	sdmac->bd = sdma_iram_malloc(sizeof(sdmac->bd),
+					(unsigned long)&sdmac->bd_phys);
 #else
-	sdmac->bd = dma_alloc_noncached(NULL, PAGE_SIZE, &sdmac->bd_phys, GFP_KERNEL);
+	sdmac->bd = dma_alloc_coherent(NULL, PAGE_SIZE, &sdmac->bd_phys, GFP_KERNEL);
 #endif
 	if (!sdmac->bd) {
 		ret = -ENOMEM;
@@ -1077,7 +1106,7 @@ static void sdma_free_chan_resources(struct dma_chan *chan)
 	sdma_set_channel_priority(sdmac, 0);
 
 #ifdef CONFIG_SDMA_IRAM
-	iram_free(sdmac->bd_phys, PAGE_SIZE);
+	sdma_iram_free(sdmac->bd_phys, sizeof(sdmac->bd));
 #else
 	dma_free_coherent(NULL, PAGE_SIZE, sdmac->bd, sdmac->bd_phys);
 #endif
@@ -1465,10 +1494,15 @@ static int __init sdma_init(struct sdma_engine *sdma)
 	writel_relaxed(0, sdma->regs + SDMA_H_C0PTR);
 
 #ifdef CONFIG_SDMA_IRAM
-	sdma->channel_control = iram_alloc(MAX_DMA_CHANNELS *
+	/* Allocate memory for SDMA channel and buffer descriptors */
+	sdma_iram_vaddr = iram_alloc(SZ_4K, &sdma_iram_paddr);
+	sdma_iram_pool = gen_pool_create(PAGE_SHIFT/2, -1);
+	gen_pool_add(sdma_iram_pool, sdma_iram_paddr, SZ_4K, -1);
+
+	sdma->channel_control = sdma_iram_malloc(MAX_DMA_CHANNELS *
 			sizeof(struct sdma_channel_control)
 			+ sizeof(struct sdma_context_data),
-			(unsigned long *)&ccb_phys);
+			&ccb_phys);
 #else
 	sdma->channel_control = dma_alloc_coherent(NULL,
 			MAX_DMA_CHANNELS * sizeof (struct sdma_channel_control) +

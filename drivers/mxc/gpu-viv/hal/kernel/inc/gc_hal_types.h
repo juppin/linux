@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*    Copyright (C) 2005 - 2013 by Vivante Corp.
+*    Copyright (C) 2005 - 2012 by Vivante Corp.
 *
 *    This program is free software; you can redistribute it and/or modify
 *    it under the terms of the GNU General Public License as published by
@@ -17,6 +17,8 @@
 *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 *
 *****************************************************************************/
+
+
 
 
 #ifndef __gc_hal_types_h_
@@ -128,7 +130,6 @@ typedef int                     gctBOOL;
 typedef gctBOOL *               gctBOOL_PTR;
 
 typedef int                     gctINT;
-typedef long                    gctLONG;
 typedef signed char             gctINT8;
 typedef signed short            gctINT16;
 typedef signed int              gctINT32;
@@ -172,7 +173,6 @@ typedef void *                  gctFILE;
 typedef void *                  gctSIGNAL;
 typedef void *                  gctWINDOW;
 typedef void *                  gctIMAGE;
-typedef void *                  gctSYNC_POINT;
 
 typedef void *					gctSEMAPHORE;
 
@@ -588,13 +588,13 @@ gceSTATUS;
 #if gcmIS_DEBUG(gcdDEBUG_CODE)
 
 #   define gcmSTORELOADSTATE(CommandBuffer, Memory, Address, Count) \
-        CommandBuffer->lastLoadStatePtr     = gcmPTR_TO_UINT64(Memory); \
+        CommandBuffer->lastLoadStatePtr     = Memory; \
         CommandBuffer->lastLoadStateAddress = Address; \
         CommandBuffer->lastLoadStateCount   = Count
 
 #   define gcmVERIFYLOADSTATE(CommandBuffer, Memory, Address) \
         gcmASSERT( \
-            (gctUINT) (Memory  - gcmUINT64_TO_TYPE(CommandBuffer->lastLoadStatePtr, gctUINT32_PTR) - 1) \
+            (gctUINT) (Memory  - CommandBuffer->lastLoadStatePtr - 1) \
             == \
             (gctUINT) (Address - CommandBuffer->lastLoadStateAddress) \
             ); \
@@ -623,10 +623,10 @@ gceSTATUS;
 #   define gcmBEGINSECUREUSER() \
         __secure_user_offset__ = reserve->lastOffset; \
         \
-        __secure_user_hintArray__ = gcmUINT64_TO_PTR(reserve->hintArrayTail)
+        __secure_user_hintArray__ = reserve->hintArrayTail
 
 #   define gcmENDSECUREUSER() \
-        reserve->hintArrayTail = gcmPTR_TO_UINT64(__secure_user_hintArray__)
+        reserve->hintArrayTail = __secure_user_hintArray__
 
 #   define gcmSKIPSECUREUSER() \
         __secure_user_offset__ += gcmSIZEOF(gctUINT32)
@@ -682,7 +682,7 @@ gceSTATUS;
         Hardware->buffer, ReserveSize, gcvTRUE, &CommandBuffer \
         )); \
     \
-    Memory =  gcmUINT64_TO_PTR(CommandBuffer->lastReserve); \
+    Memory = (gctUINT32_PTR) CommandBuffer->lastReserve; \
     \
     StateDelta = Hardware->delta; \
     \
@@ -694,7 +694,7 @@ gceSTATUS;
     gcmENDSECUREUSER(); \
     \
     gcmASSERT( \
-        gcmUINT64_TO_TYPE(CommandBuffer->lastReserve, gctUINT8_PTR) + ReserveSize \
+        ((gctUINT8_PTR) CommandBuffer->lastReserve) + ReserveSize \
         == \
          (gctUINT8_PTR) Memory \
         ); \
@@ -704,8 +704,7 @@ gceSTATUS;
 
 #define gcmBEGINSTATEBATCH(CommandBuffer, Memory, FixedPoint, Address, Count) \
 { \
-    gcmASSERT(((Memory - gcmUINT64_TO_TYPE(CommandBuffer->lastReserve, gctUINT32_PTR)) & 1) == 0); \
-    gcmASSERT((gctUINT32)Count <= 1024); \
+    gcmASSERT(((Memory - (gctUINT32_PTR) CommandBuffer->lastReserve) & 1) == 0); \
     \
     gcmVERIFYLOADSTATEDONE(CommandBuffer); \
     \
@@ -724,7 +723,7 @@ gceSTATUS;
 { \
     gcmVERIFYLOADSTATEDONE(CommandBuffer); \
     \
-    gcmASSERT(((Memory - gcmUINT64_TO_TYPE(CommandBuffer->lastReserve, gctUINT32_PTR)) & 1) == 0); \
+    gcmASSERT(((Memory - (gctUINT32_PTR) CommandBuffer->lastReserve) & 1) == 0); \
 }
 
 /*----------------------------------------------------------------------------*/
@@ -903,13 +902,13 @@ gceSTATUS;
 typedef struct _gcsDATABASE_COUNTERS
 {
     /* Number of currently allocated bytes. */
-    gctUINT64                   bytes;
+    gctSIZE_T                   bytes;
 
     /* Maximum number of bytes allocated (memory footprint). */
-    gctUINT64                   maxBytes;
+    gctSIZE_T                   maxBytes;
 
     /* Total number of bytes allocated. */
-    gctUINT64                   totalBytes;
+    gctSIZE_T                   totalBytes;
 }
 gcsDATABASE_COUNTERS;
 
@@ -943,19 +942,12 @@ typedef struct _gcsHAL_FRAME_INFO
     OUT gctUINT                 readRequests[8];
     OUT gctUINT                 writeRequests[8];
 
-    /* FE counters. */
-    OUT gctUINT                 drawCount;
-    OUT gctUINT                 vertexOutCount;
-    OUT gctUINT                 vertexMissCount;
-
     /* 3D counters. */
     OUT gctUINT                 vertexCount;
     OUT gctUINT                 primitiveCount;
     OUT gctUINT                 rejectedPrimitives;
     OUT gctUINT                 culledPrimitives;
     OUT gctUINT                 clippedPrimitives;
-    OUT gctUINT                 droppedPrimitives;
-    OUT gctUINT                 frustumClippedPrimitives;
     OUT gctUINT                 outPrimitives;
     OUT gctUINT                 inPrimitives;
     OUT gctUINT                 culledQuadCount;
@@ -973,86 +965,17 @@ typedef struct _gcsHAL_FRAME_INFO
     OUT gctUINT                 shaderCycles;
     OUT gctUINT                 vsInstructionCount;
     OUT gctUINT                 vsTextureCount;
-    OUT gctUINT                 vsBranchCount;
-    OUT gctUINT                 vsVertices;
     OUT gctUINT                 psInstructionCount;
     OUT gctUINT                 psTextureCount;
-    OUT gctUINT                 psBranchCount;
-    OUT gctUINT                 psPixels;
 
     /* Texture counters. */
     OUT gctUINT                 bilinearRequests;
     OUT gctUINT                 trilinearRequests;
-    OUT gctUINT                 txBytes8[2];
+    OUT gctUINT                 txBytes8;
     OUT gctUINT                 txHitCount;
     OUT gctUINT                 txMissCount;
 }
 gcsHAL_FRAME_INFO;
-
-typedef enum _gcePATCH_ID
-{
-    gcePATCH_UNKNOWN = 0xFFFFFFFF,
-
-    /* Benchmark list*/
-    gcePATCH_GLB11 = 0x0,
-    gcePATCH_GLB21,
-    gcePATCH_GLB25,
-    gcePATCH_GLB27,
-
-    gcePATCH_BM21,
-    gcePATCH_MM,
-    gcePATCH_MM06,
-    gcePATCH_MM07,
-    gcePATCH_QUADRANT,
-    gcePATCH_ANTUTU,
-    gcePATCH_SMARTBENCH,
-    gcePATCH_JPCT,
-    gcePATCH_NENAMARK,
-    gcePATCH_NENAMARK2,
-    gcePATCH_NEOCORE,
-    gcePATCH_GLB,
-    gcePATCH_GB,
-    gcePATCH_RTESTVA,
-    gcePATCH_BMX,
-    gcePATCH_BMGUI,
-
-    /* Game list */
-    gcePATCH_NBA2013,
-    gcePATCH_BARDTALE,
-    gcePATCH_BUSPARKING3D,
-    gcePATCH_FISHBOODLE,
-    gcePATCH_SUBWAYSURFER,
-    gcePATCH_HIGHWAYDRIVER,
-    gcePATCH_PREMIUM,
-    gcePATCH_RACEILLEGAL,
-    gcePATCH_BLABLA,
-    gcePATCH_MEGARUN,
-    gcePATCH_GALAXYONFIRE2,
-    gcePATCH_GLOFTR3HM,
-    gcePATCH_GLOFTSXHM,
-    gcePATCH_GLOFTF3HM,
-    gcePATCH_GLOFTGANG,
-    gcePATCH_XRUNNER,
-    gcePATCH_WP,
-    gcePATCH_DEVIL,
-    gcePATCH_HOLYARCH,
-    gcePATCH_MUSE,
-    gcePATCH_SG,
-    gcePATCH_SIEGECRAFT,
-    gcePATCH_CARCHALLENGE,
-    gcePATCH_HEROESCALL,
-    gcePATCH_MONOPOLY,
-    gcePATCH_CTGL20,
-    gcePATCH_FIREFOX,
-    gcePATCH_CHORME,
-    gcePATCH_DUOKANTV,
-    gcePATCH_TESTAPP,
-    gcePATCH_GOOGLEEARTH,
-
-    /* Count enum*/
-    gcePATCH_COUNT,
-}
-gcePATCH_ID;
 
 #if gcdLINK_QUEUE_SIZE
 typedef struct _gckLINKDATA * gckLINKDATA;

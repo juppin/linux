@@ -9,7 +9,6 @@
 #define _LINUX_BACKLIGHT_H
 
 #include <linux/device.h>
-#include <linux/fb.h>
 #include <linux/mutex.h>
 #include <linux/notifier.h>
 
@@ -102,8 +101,6 @@ struct backlight_device {
 	struct notifier_block fb_notif;
 
 	struct device dev;
-
-	struct fb_event *fb_event;
 };
 
 static inline void backlight_update_status(struct backlight_device *bd)

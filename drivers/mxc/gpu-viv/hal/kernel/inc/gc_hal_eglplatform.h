@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*    Copyright (C) 2005 - 2013 by Vivante Corp.
+*    Copyright (C) 2005 - 2012 by Vivante Corp.
 *
 *    This program is free software; you can redistribute it and/or modify
 *    it under the terms of the GNU General Public License as published by
@@ -17,6 +17,9 @@
 *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 *
 *****************************************************************************/
+
+
+
 
 #ifndef __gc_hal_eglplatform_h_
 #define __gc_hal_eglplatform_h_
@@ -45,7 +48,7 @@ typedef struct __BITFIELDINFO{
 #elif defined(LINUX) && defined(EGL_API_DFB) && !defined(__APPLE__)
 #include <directfb.h>
 typedef struct _DFBDisplay * HALNativeDisplayType;
-typedef struct _DFBWindow *  HALNativeWindowType;
+typedef IDirectFBWindow *  HALNativeWindowType;
 typedef struct _DFBPixmap *  HALNativePixmapType;
 
 #elif defined(LINUX) && defined(EGL_API_FB) && !defined(__APPLE__)
@@ -226,8 +229,7 @@ gcoOS_GetDisplayInfoEx(
     );
 
 gceSTATUS
-gcoOS_GetNextDisplayInfoExByIndex(
-    IN gctINT Index,
+gcoOS_GetNextDisplayInfoEx(
     IN HALNativeDisplayType Display,
     IN HALNativeWindowType Window,
     IN gctUINT DisplayInfoSize,
@@ -274,15 +276,15 @@ gcoOS_SetDisplayVirtualEx(
 
 gceSTATUS
 gcoOS_SetSwapInterval(
-    IN HALNativeDisplayType Display,
-    IN gctINT Interval
+	IN HALNativeDisplayType Display,
+	IN gctINT Interval
 );
 
 gceSTATUS
 gcoOS_GetSwapInterval(
-    IN HALNativeDisplayType Display,
-    IN gctINT_PTR Min,
-    IN gctINT_PTR Max
+	IN HALNativeDisplayType Display,
+	IN gctINT_PTR Min,
+	IN gctINT_PTR Max
 );
 
 gceSTATUS

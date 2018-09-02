@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2014 Freescale Semiconductor, Inc.
+ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -52,7 +52,6 @@
 
 #include <linux/console.h>
 #include <linux/types.h>
-#include <linux/switch.h>
 
 #include "edid.h"
 #include <mach/mxc_edid.h>
@@ -190,8 +189,6 @@ struct mxc_hdmi {
 	bool requesting_vga_for_initialization;
 
 	struct hdmi_phy_reg_config phy_config;
-	struct switch_dev sdev_audio;
-	struct switch_dev sdev_display;
 };
 
 static int hdmi_major;
@@ -1885,14 +1882,17 @@ static void mxc_hdmi_set_mode(struct mxc_hdmi *hdmi)
 	dev_dbg(&hdmi->pdev->dev, "%s\n", __func__);
 
 	/* Set the default mode only once. */
-	dev_dbg(&hdmi->pdev->dev, "%s: setting to default=%s bpp=%d\n",
-		__func__, hdmi->dft_mode_str, hdmi->default_bpp);
+	if (!hdmi->dft_mode_set) {
+		dev_dbg(&hdmi->pdev->dev, "%s: setting to default=%s bpp=%d\n",
+			__func__, hdmi->dft_mode_str, hdmi->default_bpp);
 
-	fb_find_mode(&var, hdmi->fbi,
-		     hdmi->dft_mode_str, NULL, 0, NULL,
-		     hdmi->default_bpp);
+		fb_find_mode(&var, hdmi->fbi,
+			     hdmi->dft_mode_str, NULL, 0, NULL,
+			     hdmi->default_bpp);
 
-	hdmi->dft_mode_set = true;
+		hdmi->dft_mode_set = true;
+	} else
+		fb_videomode_to_var(&var, &hdmi->previous_non_vga_mode);
 
 	fb_var_to_videomode(&m, &var);
 	dump_fb_videomode(&m);
@@ -1942,10 +1942,6 @@ static void mxc_hdmi_cable_connected(struct mxc_hdmi *hdmi)
 	/* HDMI Initialization Steps D, E, F */
 	switch (edid_status) {
 	case HDMI_EDID_SUCCESS:
-		/* centimeter to millimeter */
-		hdmi->fbi->var.width = hdmi->fbi->monspecs.max_x * 10;
-		hdmi->fbi->var.height = hdmi->fbi->monspecs.max_y * 10;
-
 		mxc_hdmi_edid_rebuild_modelist(hdmi);
 		break;
 
@@ -1968,16 +1964,14 @@ static void mxc_hdmi_cable_connected(struct mxc_hdmi *hdmi)
 	dev_dbg(&hdmi->pdev->dev, "%s exit\n", __func__);
 }
 
-static int mxc_hdmi_power_on(struct mxc_dispdrv_handle *disp,
-			     struct fb_info *fbi)
+static int mxc_hdmi_power_on(struct mxc_dispdrv_handle *disp)
 {
 	struct mxc_hdmi *hdmi = mxc_dispdrv_getdata(disp);
 	mxc_hdmi_phy_init(hdmi);
 	return 0;
 }
 
-static void mxc_hdmi_power_off(struct mxc_dispdrv_handle *disp,
-			       struct fb_info *fbi)
+static void mxc_hdmi_power_off(struct mxc_dispdrv_handle *disp)
 {
 	struct mxc_hdmi *hdmi = mxc_dispdrv_getdata(disp);
 	mxc_hdmi_phy_disable(hdmi);
@@ -2034,16 +2028,9 @@ static void hotplug_worker(struct work_struct *work)
 #endif
 			hdmi_set_cable_state(1);
 
-			if (!hdmi->hdmi_data.video_mode.mDVI)
-				switch_set_state(&hdmi->sdev_audio, 1);
-			switch_set_state(&hdmi->sdev_display, 1);
-
 		} else if (!(phy_int_pol & HDMI_PHY_HPD)) {
 			/* Plugout event */
 			dev_dbg(&hdmi->pdev->dev, "EVENT=plugout\n");
-			switch_set_state(&hdmi->sdev_audio, 0);
-			switch_set_state(&hdmi->sdev_display, 0);
-
 			hdmi_set_cable_state(0);
 			mxc_hdmi_abort_stream();
 			mxc_hdmi_cable_disconnected(hdmi);
@@ -2314,7 +2301,6 @@ static int mxc_hdmi_fb_event(struct notifier_block *nb,
 {
 	struct fb_event *event = v;
 	struct mxc_hdmi *hdmi = container_of(nb, struct mxc_hdmi, nb);
-	struct fb_videomode *mode;
 
 	if (strcmp(event->info->fix.id, hdmi->fbi->fix.id))
 		return 0;
@@ -2334,10 +2320,7 @@ static int mxc_hdmi_fb_event(struct notifier_block *nb,
 
 	case FB_EVENT_MODE_CHANGE:
 		dev_dbg(&hdmi->pdev->dev, "event=FB_EVENT_MODE_CHANGE\n");
-		mode = (struct fb_videomode *)event->data;
-		if ((hdmi->fb_reg) &&
-				(mode != NULL) &&
-			!fb_mode_is_equal(&hdmi->previous_mode, mode))
+		if (hdmi->fb_reg)
 			mxc_hdmi_setup(hdmi, val);
 		break;
 
@@ -2740,12 +2723,6 @@ static int __devinit mxc_hdmi_probe(struct platform_device *pdev)
 		ret = (int)hdmi->disp_mxc_hdmi;
 		goto edispdrv;
 	}
-
-	hdmi->sdev_audio.name = "hdmi_audio";
-	hdmi->sdev_display.name = "hdmi";
-	switch_dev_register(&hdmi->sdev_audio);
-	switch_dev_register(&hdmi->sdev_display);
-
 	mxc_dispdrv_setdata(hdmi->disp_mxc_hdmi, hdmi);
 
 	platform_set_drvdata(pdev, hdmi);
@@ -2772,9 +2749,6 @@ static int mxc_hdmi_remove(struct platform_device *pdev)
 	int irq = platform_get_irq(pdev, 0);
 
 	fb_unregister_client(&hdmi->nb);
-
-	switch_dev_unregister(&hdmi->sdev_audio);
-	switch_dev_unregister(&hdmi->sdev_display);
 
 	mxc_dispdrv_puthandle(hdmi->disp_mxc_hdmi);
 	mxc_dispdrv_unregister(hdmi->disp_mxc_hdmi);

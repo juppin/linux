@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*    Copyright (C) 2005 - 2013 by Vivante Corp.
+*    Copyright (C) 2005 - 2012 by Vivante Corp.
 *
 *    This program is free software; you can redistribute it and/or modify
 *    it under the terms of the GNU General Public License as published by
@@ -17,6 +17,9 @@
 *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 *
 *****************************************************************************/
+
+
+
 
 
 #ifndef __gc_hal_kernel_hardware_vg_h_
@@ -53,6 +56,7 @@ struct _gckVGHARDWARE
     gctBOOL                     clockState;
     gctBOOL                     powerState;
     gctPOINTER                  powerMutex;
+    gctSIGNAL                   idleSignal;
     gctUINT32                   powerProcess;
     gctUINT32                   powerThread;
     gceCHIPPOWERSTATE           chipPowerState;
@@ -60,15 +64,11 @@ struct _gckVGHARDWARE
     gctISRMANAGERFUNC           startIsr;
     gctISRMANAGERFUNC           stopIsr;
     gctPOINTER                  isrContext;
-    gctPOINTER                  pageTableDirty;
-
-#if gcdPOWEROFF_TIMEOUT
     gctUINT32                   powerOffTime;
     gctUINT32                   powerOffTimeout;
-    gctPOINTER                  powerOffTimer;
-#endif
-
-    gctBOOL                     powerManagement;
+    gctTHREAD                   timeIdleThread;
+    gctBOOL                     killThread;
+    gctPOINTER                  pageTableDirty;
 };
 
 #endif /* __gc_hal_kernel_hardware_h_ */

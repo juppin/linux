@@ -43,7 +43,6 @@
 #include <linux/cpufreq.h>
 #include <linux/clk.h>
 #include "anatop_driver.h"
-#include <mach/hardware.h>
 
 /* register define of anatop */
 #define HW_ANADIG_ANA_MISC0	(0x00000150)

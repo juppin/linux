@@ -315,6 +315,8 @@ static const char fsg_string_interface[] = "Mass Storage";
 
 /*-------------------------------------------------------------------------*/
 
+extern void send_usb_umount_uevent();
+
 struct fsg_dev;
 struct fsg_common;
 
@@ -1072,6 +1074,7 @@ static int do_write(struct fsg_common *common)
 
 static int do_synchronize_cache(struct fsg_common *common)
 {
+	//send_usb_umount_uevent(); // file transfer will run this function, so we need some time to fix it.
 	struct fsg_lun	*curlun = common->curlun;
 	int		rc;
 
@@ -1430,6 +1433,7 @@ static int do_mode_sense(struct fsg_common *common, struct fsg_buffhd *bh)
 	return len;
 }
 
+
 static int do_start_stop(struct fsg_common *common)
 {
 	struct fsg_lun	*curlun = common->curlun;
@@ -1486,6 +1490,8 @@ static int do_start_stop(struct fsg_common *common)
 	fsg_lun_close(curlun);
 	up_write(&common->filesem);
 	down_read(&common->filesem);
+	//Terry add 20140115 : When host eject UMS, pass uevent to userspace with host_eject=true. 
+	send_usb_umount_uevent();
 
 	return common->ops && common->ops->post_eject
 		? min(0, common->ops->post_eject(common, curlun,

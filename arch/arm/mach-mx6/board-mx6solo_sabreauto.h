@@ -1,6 +1,6 @@
 
 /*
- * Copyright (C) 2012-2014 Freescale Semiconductor, Inc. All Rights Reserved.
+ * Copyright (C) 2012-2013 Freescale Semiconductor, Inc. All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -172,12 +172,6 @@ static iomux_v3_cfg_t mx6dl_sabreauto_pads[] = {
 	/* DISP0 RESET */
 	MX6DL_PAD_EIM_WAIT__GPIO_5_0,
 
-	/* eCompass int */
-	MX6DL_PAD_EIM_EB1__GPIO_2_29,
-
-	/* Acc int */
-	MX6DL_PAD_EIM_BCLK__GPIO_6_31,
-
 	/*  SPDIF */
 	MX6DL_PAD_KEY_COL3__SPDIF_IN1,
 
@@ -210,7 +204,16 @@ static iomux_v3_cfg_t mx6dl_sabreauto_pads[] = {
 
 	/* HDMI */
 	MX6DL_PAD_EIM_A25__HDMI_TX_CEC_LINE,
- };
+
+#ifdef CONFIG_MX6_ENET_IRQ_TO_GPIO
+	MX6DL_PAD_GPIO_6__OBSERVE_MUX_OBSRV_INT_OUT1,
+#else
+	/* MLB150 */
+	MX6DL_PAD_ENET_TXD1__MLB_MLBCLK,
+	MX6DL_PAD_GPIO_6__MLB_MLBSIG,
+	MX6DL_PAD_GPIO_2__MLB_MLBDAT,
+#endif
+};
 
 static iomux_v3_cfg_t mx6dl_sabreauto_can0_pads[] = {
 	/* CAN1 */

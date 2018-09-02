@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*    Copyright (C) 2005 - 2013 by Vivante Corp.
+*    Copyright (C) 2005 - 2012 by Vivante Corp.
 *
 *    This program is free software; you can redistribute it and/or modify
 *    it under the terms of the GNU General Public License as published by
@@ -19,21 +19,14 @@
 *****************************************************************************/
 
 
+
+
 #ifndef __gc_hal_kernel_device_h_
 #define __gc_hal_kernel_device_h_
 
 /******************************************************************************\
 ******************************* gckGALDEVICE Structure *******************************
 \******************************************************************************/
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
-struct contiguous_mem_pool {
-	struct dma_attrs attrs;
-	dma_addr_t phys;
-	void *virt;
-	size_t size;
-};
-#endif
 
 typedef struct _gckGALDEVICE
 {
@@ -44,18 +37,15 @@ typedef struct _gckGALDEVICE
     /* Attributes. */
     gctSIZE_T           internalSize;
     gctPHYS_ADDR        internalPhysical;
-    gctUINT32           internalPhysicalName;
     gctPOINTER          internalLogical;
     gckVIDMEM           internalVidMem;
     gctSIZE_T           externalSize;
     gctPHYS_ADDR        externalPhysical;
-    gctUINT32           externalPhysicalName;
     gctPOINTER          externalLogical;
     gckVIDMEM           externalVidMem;
     gckVIDMEM           contiguousVidMem;
     gctPOINTER          contiguousBase;
     gctPHYS_ADDR        contiguousPhysical;
-    gctUINT32           contiguousPhysicalName;
     gctSIZE_T           contiguousSize;
     gctBOOL             contiguousMapped;
     gctPOINTER          contiguousMappedUser;
@@ -100,16 +90,12 @@ typedef struct _gckGALDEVICE
     struct clk         *clk_2d_axi;
     struct clk         *clk_vg_axi;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0) || LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0)
     /*Power management.*/
     struct regulator      *gpu_regulator;
 #endif
 	/*Run time pm*/
 	struct device		*pmdev;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
-	struct contiguous_mem_pool *pool;
-	struct reset_control *rstc[gcdMAX_GPU_COUNT];
-#endif
 }
 * gckGALDEVICE;
 
@@ -183,8 +169,6 @@ gceSTATUS gckGALDEVICE_Construct(
     IN gctINT Signal,
     IN gctUINT LogFileSize,
     IN struct device *pdev,
-    IN gctINT PowerManagement,
-    IN gctINT GpuProfiler,
     OUT gckGALDEVICE *Device
     );
 

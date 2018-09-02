@@ -837,9 +837,7 @@ static void __init add_pcie_port(void __iomem *base, void __iomem *dbi_base,
 		spin_lock_init(&pp->conf_lock);
 		memset(pp->res, 0, sizeof(pp->res));
 	} else {
-		pr_info("IMX PCIe port: link down with power supply %d!\n",
-				pdata->pcie_power_always_on);
-		/* Release the clocks, and disable the power */
+		pr_info("IMX PCIe port: link down!\n");
 
 		/* Release the clocks, and disable the power */
 		pcie_clk = clk_get(NULL, "pcie_clk");
@@ -852,13 +850,11 @@ static void __init add_pcie_port(void __iomem *base, void __iomem *dbi_base,
 		imx_pcie_clrset(IOMUXC_GPR1_PCIE_REF_CLK_EN, 0 << 16,
 				IOMUXC_GPR1);
 
-		if (!pdata->pcie_power_always_on) {
-			/* Disable PCIE power */
-			gpio_request(pdata->pcie_pwr_en, "PCIE POWER_EN");
+		/* Disable PCIE power */
+		gpio_request(pdata->pcie_pwr_en, "PCIE POWER_EN");
 
-			/* activate PCIE_PWR_EN */
-			gpio_direction_output(pdata->pcie_pwr_en, 0);
-		}
+		/* activate PCIE_PWR_EN */
+		gpio_direction_output(pdata->pcie_pwr_en, 0);
 
 		imx_pcie_clrset(IOMUXC_GPR1_TEST_POWERDOWN, 1 << 18,
 				IOMUXC_GPR1);

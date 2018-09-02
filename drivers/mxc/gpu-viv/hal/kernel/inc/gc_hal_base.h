@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*    Copyright (C) 2005 - 2013 by Vivante Corp.
+*    Copyright (C) 2005 - 2012 by Vivante Corp.
 *
 *    This program is free software; you can redistribute it and/or modify
 *    it under the terms of the GNU General Public License as published by
@@ -17,6 +17,8 @@
 *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 *
 *****************************************************************************/
+
+
 
 
 #ifndef __gc_hal_base_h_
@@ -66,22 +68,11 @@ typedef struct _gcsCONTEXT_MAP *		gcsCONTEXT_MAP_PTR;
 typedef void *                          gcoVG;
 #endif
 
-#if gcdSYNC
-typedef struct _gcoFENCE *              gcoFENCE;
-typedef struct _gcsSYNC_CONTEXT  *      gcsSYNC_CONTEXT_PTR;
-#endif
-
-typedef struct _gcoOS_SymbolsList gcoOS_SymbolsList;
-
 /******************************************************************************\
 ******************************* Process local storage *************************
 \******************************************************************************/
+
 typedef struct _gcsPLS * gcsPLS_PTR;
-
-typedef void (* gctPLS_DESTRUCTOR) (
-    gcsPLS_PTR
-    );
-
 typedef struct _gcsPLS
 {
     /* Global objects. */
@@ -110,22 +101,13 @@ typedef struct _gcsPLS
 
     /* PorcessID of the constrcutor process */
     gctUINT32                   processID;
-#if gcdFORCE_GAL_LOAD_TWICE
-    /* ThreadID of the constrcutor process. */
-    gctSIZE_T                   threadID;
-    /* Flag for calling module destructor. */
-    gctBOOL                     exiting;
-#endif
 
     /* Reference count for destructor. */
     gcsATOM_PTR                 reference;
-    gctBOOL                     bKFS;
 #if gcdUSE_NPOT_PATCH
     gctBOOL                     bNeedSupportNP2Texture;
 #endif
 
-    /* Destructor for eglDisplayInfo. */
-    gctPLS_DESTRUCTOR           destructor;
 }
 gcsPLS;
 
@@ -138,7 +120,7 @@ extern gcsPLS gcPLS;
 typedef struct _gcsTLS * gcsTLS_PTR;
 
 typedef void (* gctTLS_DESTRUCTOR) (
-    gcsTLS_PTR
+    gcsTLS_PTR TLS
     );
 
 typedef struct _gcsTLS
@@ -158,16 +140,8 @@ typedef struct _gcsTLS
 #ifndef VIVANTE_NO_3D
 	gco3D						engine3D;
 #endif
-#if gcdSYNC
-    gctBOOL                     fenceEnable;
-#endif
 	gco2D						engine2D;
     gctBOOL                     copied;
-
-#if gcdFORCE_GAL_LOAD_TWICE
-    /* libGAL.so handle */
-    gctHANDLE                   handle;
-#endif
 }
 gcsTLS;
 
@@ -180,7 +154,6 @@ typedef enum _gcePLS_VALUE
   gcePLS_VALUE_EGL_DISPLAY_INFO,
   gcePLS_VALUE_EGL_SURFACE_INFO,
   gcePLS_VALUE_EGL_CONFIG_FORMAT_INFO,
-  gcePLS_VALUE_EGL_DESTRUCTOR_INFO,
 }
 gcePLS_VALUE;
 
@@ -598,12 +571,6 @@ gcoHAL_Call(
     IN OUT gcsHAL_INTERFACE_PTR Interface
     );
 
-gceSTATUS
-gcoHAL_GetPatchID(
-    IN  gcoHAL Hal,
-    OUT gcePATCH_ID * PatchID
-    );
-
 /* Schedule an event. */
 gceSTATUS
 gcoHAL_ScheduleEvent(
@@ -664,16 +631,6 @@ gcoHAL_QuerySeparated3D2D(
     IN gcoHAL Hal
     );
 
-gceSTATUS
-gcoHAL_QuerySpecialHint(
-    IN gceSPECIAL_HINT Hint
-    );
-
-gceSTATUS
-gcoHAL_SetSpecialHintData(
-    IN gcoHARDWARE Hardware
-    );
-
 /* Get pointer to gcoVG object. */
 gceSTATUS
 gcoHAL_GetVGEngine(
@@ -695,6 +652,8 @@ gcoHAL_QueryChipFeature(
     IN gceFEATURE   Feature);
 
 #endif
+
+
 /******************************************************************************\
 ********************************** gcoOS Object *********************************
 \******************************************************************************/
@@ -823,6 +782,7 @@ gcoOS_FreeVideoMemory(
     IN gctPOINTER Handle
     );
 
+#if gcdENABLE_BANK_ALIGNMENT
 gceSTATUS
 gcoSURF_GetBankOffsetBytes(
     IN gcoSURF Surfce,
@@ -830,6 +790,7 @@ gcoSURF_GetBankOffsetBytes(
     IN gctUINT32 Stride,
     IN gctUINT32_PTR Bytes
     );
+#endif
 
 /* Map user memory. */
 gceSTATUS
@@ -953,21 +914,6 @@ gcoOS_Flush(
     IN gctFILE File
     );
 
-/* Close a file descriptor. */
-gceSTATUS
-gcoOS_CloseFD(
-    IN gcoOS Os,
-    IN gctINT FD
-    );
-
-/* Dup file descriptor to another. */
-gceSTATUS
-gcoOS_DupFD(
-    IN gcoOS Os,
-    IN gctINT FD,
-    OUT gctINT * FD2
-    );
-
 /* Create an endpoint for communication. */
 gceSTATUS
 gcoOS_Socket(
@@ -1027,14 +973,6 @@ gcoOS_GetEnv(
     OUT gctSTRING * Value
     );
 
-/* Set environment variable value. */
-gceSTATUS
-gcoOS_SetEnv(
-    IN gcoOS Os,
-    IN gctCONST_STRING VarName,
-    IN gctSTRING Value
-    );
-
 /* Get current working directory. */
 gceSTATUS
 gcoOS_GetCwd(
@@ -1084,6 +1022,29 @@ gcoOS_GetPos(
     OUT gctUINT32 * Position
     );
 
+/* Perform a memory copy. */
+gceSTATUS
+gcoOS_MemCopy(
+    IN gctPOINTER Destination,
+    IN gctCONST_POINTER Source,
+    IN gctSIZE_T Bytes
+    );
+
+/* Perform a memory fill. */
+gceSTATUS
+gcoOS_MemFill(
+    IN gctPOINTER Destination,
+    IN gctUINT8 Filler,
+    IN gctSIZE_T Bytes
+    );
+
+/* Zero memory. */
+gceSTATUS
+gcoOS_ZeroMemory(
+    IN gctPOINTER Memory,
+    IN gctSIZE_T Bytes
+    );
+
 /* Same as strstr. */
 gceSTATUS
 gcoOS_StrStr(
@@ -1098,6 +1059,12 @@ gcoOS_StrFindReverse(
     IN gctCONST_STRING String,
     IN gctINT8 Character,
     OUT gctSTRING * Output
+    );
+
+gceSTATUS
+gcoOS_StrLen(
+    IN gctCONST_STRING String,
+    OUT gctSIZE_T * Length
     );
 
 gceSTATUS
@@ -1146,15 +1113,13 @@ gcoOS_StrToFloat(
     );
 
 /* Convert hex string to integer. */
-gceSTATUS
-gcoOS_HexStrToInt(
+gceSTATUS gcoOS_HexStrToInt(
 	IN gctCONST_STRING String,
 	OUT gctINT * Int
 	);
 
 /* Convert hex string to float. */
-gceSTATUS
-gcoOS_HexStrToFloat(
+gceSTATUS gcoOS_HexStrToFloat(
 	IN gctCONST_STRING String,
 	OUT gctFLOAT * Float
 	);
@@ -1262,18 +1227,6 @@ gceSTATUS
 gcoOS_DetectProcessByName(
     IN gctCONST_STRING Name
     );
-
-gceSTATUS
-gcoOS_DetectProcessByEncryptedName(
-    IN gctCONST_STRING Name
-    );
-
-#if defined(ANDROID)
-gceSTATUS
-gcoOS_DetectProgrameByEncryptedSymbols(
-    IN gcoOS_SymbolsList Symbols
-    );
-#endif
 
 /*----------------------------------------------------------------------------*/
 /*----- Atoms ----------------------------------------------------------------*/
@@ -1468,42 +1421,6 @@ gcoOS_UnmapSignal(
     IN gctSIGNAL Signal
     );
 
-/*----------------------------------------------------------------------------*/
-/*----- Android Native Fence -------------------------------------------------*/
-
-/* Create sync point. */
-gceSTATUS
-gcoOS_CreateSyncPoint(
-    IN gcoOS Os,
-    OUT gctSYNC_POINT * SyncPoint
-    );
-
-/* Destroy sync point. */
-gceSTATUS
-gcoOS_DestroySyncPoint(
-    IN gcoOS Os,
-    IN gctSYNC_POINT SyncPoint
-    );
-
-/* Create native fence. */
-gceSTATUS
-gcoOS_CreateNativeFence(
-    IN gcoOS Os,
-    IN gctSYNC_POINT SyncPoint,
-    OUT gctINT * FenceFD
-    );
-
-/* Wait on native fence. */
-gceSTATUS
-gcoOS_WaitNativeFence(
-    IN gcoOS Os,
-    IN gctINT FenceFD,
-    IN gctUINT32 Timeout
-    );
-
-/*----------------------------------------------------------------------------*/
-/*----- Memory Access and Cache ----------------------------------------------*/
-
 /* Write a register. */
 gceSTATUS
 gcoOS_WriteRegister(
@@ -1523,7 +1440,7 @@ gcoOS_ReadRegister(
 gceSTATUS
 gcoOS_CacheClean(
     IN gcoOS Os,
-    IN gctUINT64 Node,
+    IN gcuVIDMEM_NODE_PTR Node,
     IN gctPOINTER Logical,
     IN gctSIZE_T Bytes
     );
@@ -1531,7 +1448,7 @@ gcoOS_CacheClean(
 gceSTATUS
 gcoOS_CacheFlush(
     IN gcoOS Os,
-    IN gctUINT64 Node,
+    IN gcuVIDMEM_NODE_PTR Node,
     IN gctPOINTER Logical,
     IN gctSIZE_T Bytes
     );
@@ -1539,7 +1456,7 @@ gcoOS_CacheFlush(
 gceSTATUS
 gcoOS_CacheInvalidate(
     IN gcoOS Os,
-    IN gctUINT64 Node,
+    IN gcuVIDMEM_NODE_PTR Node,
     IN gctPOINTER Logical,
     IN gctSIZE_T Bytes
     );
@@ -1608,7 +1525,7 @@ gcoOS_QueryProfileTickRate(
 #   define gcmPROFILE_QUERY(start, ticks)   do { } while (gcvFALSE)
 #   define gcmPROFILE_ONLY(x)               do { } while (gcvFALSE)
 #   define gcmPROFILE_ELSE(x)               x
-#   define gcmPROFILE_DECLARE_ONLY(x)       do { } while (gcvFALSE) 
+#   define gcmPROFILE_DECLARE_ONLY(x)       typedef x
 #   define gcmPROFILE_DECLARE_ELSE(x)       x
 #endif
 
@@ -1679,28 +1596,6 @@ typedef struct _gcsRECT
     gctINT32                    bottom;
 }
 gcsRECT;
-
-typedef union _gcsPIXEL
-{
-    struct
-    {
-        gctFLOAT r, g, b, a;
-        gctFLOAT d, s;
-    } pf;
-
-    struct
-    {
-        gctINT32 r, g, b, a;
-        gctINT32 d, s;
-    } pi;
-
-    struct
-    {
-        gctUINT32 r, g, b, a;
-        gctUINT32 d, s;
-    } pui;
-
-} gcsPIXEL;
 
 
 /******************************************************************************\
@@ -1891,9 +1786,23 @@ gcoSURF_MapUserSurface(
 gceSTATUS
 gcoSURF_QueryVidMemNode(
     IN gcoSURF Surface,
-    OUT gctUINT64 * Node,
+    OUT gcuVIDMEM_NODE_PTR * Node,
     OUT gcePOOL * Pool,
     OUT gctUINT_PTR Bytes
+    );
+
+/*  Set usage attribute of a surface. */
+gceSTATUS
+gcoSURF_SetUsage(
+    IN gcoSURF Surface,
+    IN gceSURF_USAGE Usage
+    );
+
+/*  Return usage attribute of a surface. */
+gceSTATUS
+gcoSURF_QueryUsage(
+    IN gcoSURF Surface,
+    OUT gceSURF_USAGE *Usage
     );
 
 /* Set the color type of the surface. */
@@ -1915,18 +1824,6 @@ gceSTATUS
 gcoSURF_SetRotation(
     IN gcoSURF Surface,
     IN gceSURF_ROTATION Rotation
-    );
-
-gceSTATUS
-gcoSURF_SetPreRotation(
-    IN gcoSURF Surface,
-    IN gceSURF_ROTATION Rotation
-    );
-
-gceSTATUS
-gcoSURF_GetPreRotation(
-    IN gcoSURF Surface,
-    IN gceSURF_ROTATION *Rotation
     );
 
 gceSTATUS
@@ -1958,15 +1855,6 @@ gceSTATUS
 gcoSURF_DisableTileStatus(
     IN gcoSURF Surface,
     IN gctBOOL Decompress
-    );
-
-gceSTATUS
-gcoSURF_AlignResolveRect(
-    IN gcoSURF Surf,
-    IN gcsPOINT_PTR RectOrigin,
-    IN gcsPOINT_PTR RectSize,
-    OUT gcsPOINT_PTR AlignedOrigin,
-    OUT gcsPOINT_PTR AlignedSize
     );
 #endif /* VIVANTE_NO_3D */
 
@@ -2054,9 +1942,6 @@ gcoSURF_FillFromTile(
     IN gcoSURF Surface
     );
 
-/* Check if surface needs a filler. */
-gceSTATUS gcoSURF_NeedFiller(IN gcoSURF Surface);
-
 /* Fill surface with a value. */
 gceSTATUS
 gcoSURF_Fill(
@@ -2096,33 +1981,12 @@ gcoSURF_SetBuffer(
     IN gctUINT32 Physical
     );
 
-/* Set the underlying video buffer for the surface wrapper. */
-gceSTATUS
-gcoSURF_SetVideoBuffer(
-    IN gcoSURF Surface,
-    IN gceSURF_TYPE Type,
-    IN gceSURF_FORMAT Format,
-    IN gctUINT Width,
-    IN gctUINT Height,
-    IN gctUINT Stride,
-    IN gctPOINTER *LogicalPlane1,
-    IN gctUINT32 *PhysicalPlane1
-    );
-
 /* Set the size of the surface in pixels and map the underlying buffer. */
 gceSTATUS
 gcoSURF_SetWindow(
     IN gcoSURF Surface,
     IN gctUINT X,
     IN gctUINT Y,
-    IN gctUINT Width,
-    IN gctUINT Height
-    );
-
-/* Set width/height alignment of the surface directly and calculate stride/size. This is only for dri backend now. Please be careful before use. */
-gceSTATUS
-gcoSURF_SetAlignment(
-    IN gcoSURF Surface,
     IN gctUINT Width,
     IN gctUINT Height
     );
@@ -2158,12 +2022,6 @@ gceSTATUS
 gcoSURF_SetOffset(
     IN gcoSURF Surface,
     IN gctUINT Offset
-    );
-
-gceSTATUS
-gcoSURF_GetOffset(
-    IN gcoSURF Surface,
-    OUT gctUINT *Offset
     );
 
 gceSTATUS
@@ -2592,7 +2450,6 @@ gcoOS_DebugTrace(
 #define gcvZONE_DEVICE          (1 << 10)
 #define gcvZONE_DATABASE        (1 << 11)
 #define gcvZONE_INTERRUPT       (1 << 12)
-#define gcvZONE_POWER           (1 << 13)
 
 /* User zones. */
 #define gcvZONE_HAL             (1 << 3)
@@ -3485,12 +3342,12 @@ gckOS_DebugBreak(
 
 void
 gcoOS_Verify(
-    IN gceSTATUS status
+    IN gceSTATUS Status
     );
 
 void
 gckOS_Verify(
-    IN gceSTATUS status
+    IN gceSTATUS Status
     );
 
 #if gcmIS_DEBUG(gcdDEBUG_ASSERT)
@@ -3807,7 +3664,6 @@ gckOS_DebugStatus2Name(
 #   define gcmDEBUG_VERIFY_ARGUMENT(arg)
 #   define gcmkDEBUG_VERIFY_ARGUMENT(arg)
 #endif
-
 /*******************************************************************************
 **
 **  gcmVERIFY_ARGUMENT_RETURN
@@ -3864,12 +3720,6 @@ gcsUSER_DEBUG_OPTION *
 gcGetUserDebugOption(
     void
     );
-
-struct _gcoOS_SymbolsList
-{
-    gcePATCH_ID patchId;
-    const char * symList[10];
-};
 
 #if gcdHAS_ELLIPSES
 #define gcmUSER_DEBUG_MSG(level, ...) \

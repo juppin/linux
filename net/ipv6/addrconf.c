@@ -492,7 +492,8 @@ static void addrconf_forward_change(struct net *net, __s32 newf)
 	struct net_device *dev;
 	struct inet6_dev *idev;
 
-	for_each_netdev(net, dev) {
+	rcu_read_lock();
+	for_each_netdev_rcu(net, dev) {
 		idev = __in6_dev_get(dev);
 		if (idev) {
 			int changed = (!idev->cnf.forwarding) ^ (!newf);
@@ -501,6 +502,7 @@ static void addrconf_forward_change(struct net *net, __s32 newf)
 				dev_forward_change(idev);
 		}
 	}
+	rcu_read_unlock();
 }
 
 static int addrconf_fixup_forwarding(struct ctl_table *table, int *p, int old)
@@ -4580,20 +4582,26 @@ static void addrconf_sysctl_unregister(struct inet6_dev *idev)
 
 static int __net_init addrconf_init_net(struct net *net)
 {
-	int err = -ENOMEM;
+	int err;
 	struct ipv6_devconf *all, *dflt;
 
-	all = kmemdup(&ipv6_devconf, sizeof(ipv6_devconf), GFP_KERNEL);
-	if (all == NULL)
-		goto err_alloc_all;
+	err = -ENOMEM;
+	all = &ipv6_devconf;
+	dflt = &ipv6_devconf_dflt;
 
-	dflt = kmemdup(&ipv6_devconf_dflt, sizeof(ipv6_devconf_dflt), GFP_KERNEL);
-	if (dflt == NULL)
-		goto err_alloc_dflt;
+	if (!net_eq(net, &init_net)) {
+		all = kmemdup(all, sizeof(ipv6_devconf), GFP_KERNEL);
+		if (all == NULL)
+			goto err_alloc_all;
 
-	/* these will be inherited by all namespaces */
-	dflt->autoconf = ipv6_defaults.autoconf;
-	dflt->disable_ipv6 = ipv6_defaults.disable_ipv6;
+		dflt = kmemdup(dflt, sizeof(ipv6_devconf_dflt), GFP_KERNEL);
+		if (dflt == NULL)
+			goto err_alloc_dflt;
+	} else {
+		/* these will be inherited by all namespaces */
+		dflt->autoconf = ipv6_defaults.autoconf;
+		dflt->disable_ipv6 = ipv6_defaults.disable_ipv6;
+	}
 
 	net->ipv6.devconf_all = all;
 	net->ipv6.devconf_dflt = dflt;
@@ -4715,20 +4723,16 @@ int __init addrconf_init(void)
 	if (err < 0)
 		goto errout_af;
 
-	err = __rtnl_register(PF_INET6, RTM_GETLINK, NULL, inet6_dump_ifinfo,
-			      NULL);
+	err = __rtnl_register(PF_INET6, RTM_GETLINK, NULL, inet6_dump_ifinfo);
 	if (err < 0)
 		goto errout;
 
 	/* Only the first call to __rtnl_register can fail */
-	__rtnl_register(PF_INET6, RTM_NEWADDR, inet6_rtm_newaddr, NULL, NULL);
-	__rtnl_register(PF_INET6, RTM_DELADDR, inet6_rtm_deladdr, NULL, NULL);
-	__rtnl_register(PF_INET6, RTM_GETADDR, inet6_rtm_getaddr,
-			inet6_dump_ifaddr, NULL);
-	__rtnl_register(PF_INET6, RTM_GETMULTICAST, NULL,
-			inet6_dump_ifmcaddr, NULL);
-	__rtnl_register(PF_INET6, RTM_GETANYCAST, NULL,
-			inet6_dump_ifacaddr, NULL);
+	__rtnl_register(PF_INET6, RTM_NEWADDR, inet6_rtm_newaddr, NULL);
+	__rtnl_register(PF_INET6, RTM_DELADDR, inet6_rtm_deladdr, NULL);
+	__rtnl_register(PF_INET6, RTM_GETADDR, inet6_rtm_getaddr, inet6_dump_ifaddr);
+	__rtnl_register(PF_INET6, RTM_GETMULTICAST, NULL, inet6_dump_ifmcaddr);
+	__rtnl_register(PF_INET6, RTM_GETANYCAST, NULL, inet6_dump_ifacaddr);
 
 	ipv6_addr_label_rtnl_register();
 

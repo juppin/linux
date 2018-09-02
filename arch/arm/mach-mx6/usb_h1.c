@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -111,7 +111,6 @@ static int usb_phy_enable(struct fsl_usb2_platform_data *pdata)
 	UH1_USBCMD |= UCMD_RESET;
 	while ((UH1_USBCMD) & (UCMD_RESET))
 		;
-
 	/*
 	 * If the controller reset does not put the PHY be out of
 	 * low power mode, do it manually.
@@ -339,7 +338,6 @@ static void _phy_lowpower_suspend(struct fsl_usb2_platform_data *pdata, bool ena
 		mdelay(1);
 
 		usbh1_internal_phy_clock_gate(true);
-		udelay(2);
 		tmp = (BM_USBPHY_PWD_TXPWDFS
 			| BM_USBPHY_PWD_TXPWDIBIAS
 			| BM_USBPHY_PWD_TXPWDV2I
@@ -355,7 +353,6 @@ static void _phy_lowpower_suspend(struct fsl_usb2_platform_data *pdata, bool ena
 		 * according to IC engineer.
 		 */
 		udelay(500);
-
 	}
 }
 
@@ -430,7 +427,8 @@ static int  __init mx6_usb_h1_init(void)
 		imx_mxc_ehci_data_entry_single(MX6SL, 1, HS1)};
 
 	mx6_get_host1_vbus_func(&mx6_set_usb_host1_vbus);
-	usbh1_config.platform_driver_vbus = mx6_set_usb_host1_vbus;
+	if (mx6_set_usb_host1_vbus)
+		mx6_set_usb_host1_vbus(true);
 
 	/* Some phy and power's special controls for host1
 	 * 1. The external charger detector needs to be disabled
@@ -485,6 +483,8 @@ static void __exit mx6_usb_h1_exit(void)
 			| BM_ANADIG_USB2_PLL_480_CTRL_POWER \
 			| BM_ANADIG_USB2_PLL_480_CTRL_EN_USB_CLKS, \
 			anatop_base_addr + HW_ANADIG_USB2_PLL_480_CTRL_CLR);
+	if (mx6_set_usb_host1_vbus)
+		mx6_set_usb_host1_vbus(false);
 
 	return ;
 }

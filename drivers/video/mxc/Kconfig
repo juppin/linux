@@ -122,6 +122,15 @@ config FB_MXC_SIPIX_AUTO_UPDATE_MODE
 config FB_MXC_ELCDIF_FB
 	depends on FB && ARCH_MXC
 	tristate "Support MXC ELCDIF framebuffer"
+	select IMX_HAVE_PLATFORM_IMX_ELCDIF
+
+config IMX_HAVE_PLATFORM_IMX_ELCDIF
+	bool "IMX_HAVE_PLATFORM_IMX_ELCDIF"
+	default n
+	depends on FB_MXC_ELCDIF_FB
+	help
+		
+	
 
 choice
 	prompt "Async Panel Interface Type"

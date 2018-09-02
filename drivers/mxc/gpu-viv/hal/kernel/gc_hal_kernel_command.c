@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*    Copyright (C) 2005 - 2013 by Vivante Corp.
+*    Copyright (C) 2005 - 2012 by Vivante Corp.
 *
 *    This program is free software; you can redistribute it and/or modify
 *    it under the terms of the GNU General Public License as published by
@@ -17,6 +17,8 @@
 *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 *
 *****************************************************************************/
+
+
 
 
 #include "gc_hal_kernel_precomp.h"
@@ -248,7 +250,7 @@ _ProcessHints(
         if (Command->hintArrayAllocated &&
             (Command->hintArraySize < CommandBuffer->hintArraySize))
         {
-            gcmkONERROR(gcmkOS_SAFE_FREE(Command->os, gcmUINT64_TO_PTR(Command->hintArray)));
+            gcmkONERROR(gcmkOS_SAFE_FREE(Command->os, Command->hintArray));
             Command->hintArraySize = gcvFALSE;
         }
 
@@ -262,18 +264,18 @@ _ProcessHints(
                 &pointer
                 ));
 
-            Command->hintArray          = gcmPTR_TO_UINT64(pointer);
+            Command->hintArray          = pointer;
             Command->hintArrayAllocated = gcvTRUE;
             Command->hintArraySize      = CommandBuffer->hintArraySize;
         }
 
-        hintArray = gcmUINT64_TO_PTR(Command->hintArray);
+        hintArray = Command->hintArray;
         copySize   = hintCount * gcmSIZEOF(gctUINT32);
 
         gcmkONERROR(gckOS_CopyFromUserData(
             Command->os,
             hintArray,
-            gcmUINT64_TO_PTR(CommandBuffer->hintArray),
+            CommandBuffer->hintArray,
             copySize
             ));
     }
@@ -283,7 +285,7 @@ _ProcessHints(
 
         gcmkONERROR(gckOS_MapUserPointer(
             Command->os,
-            gcmUINT64_TO_PTR(CommandBuffer->hintArray),
+            CommandBuffer->hintArray,
             CommandBuffer->hintArraySize,
             &pointer
             ));
@@ -309,7 +311,7 @@ OnError:
     {
         gcmkVERIFY_OK(gckOS_UnmapUserPointer(
             Command->os,
-            gcmUINT64_TO_PTR(CommandBuffer->hintArray),
+            CommandBuffer->hintArray,
             CommandBuffer->hintArraySize,
             hintArray
             ));
@@ -494,11 +496,6 @@ gckCOMMAND_Construct(
     /* Create the context switching mutex. */
     gcmkONERROR(gckOS_CreateMutex(os, &command->mutexContext));
 
-#if VIVANTE_PROFILER_CONTEXT
-    /* Create the context switching mutex. */
-    gcmkONERROR(gckOS_CreateMutex(os, &command->mutexContextSeq));
-#endif
-
     /* Create the power management semaphore. */
     gcmkONERROR(gckOS_CreateSemaphore(os, &command->powerSemaphore));
 
@@ -576,13 +573,6 @@ OnError:
         {
             gcmkVERIFY_OK(gckOS_DeleteMutex(os, command->mutexContext));
         }
-
-#if VIVANTE_PROFILER_CONTEXT
-        if (command->mutexContextSeq != gcvNULL)
-        {
-            gcmkVERIFY_OK(gckOS_DeleteMutex(os, command->mutexContextSeq));
-        }
-#endif
 
         if (command->mutexQueue != gcvNULL)
         {
@@ -674,11 +664,6 @@ gckCOMMAND_Destroy(
     /* Delete the context switching mutex. */
     gcmkVERIFY_OK(gckOS_DeleteMutex(Command->os, Command->mutexContext));
 
-#if VIVANTE_PROFILER_CONTEXT
-    if (Command->mutexContextSeq != gcvNULL)
-        gcmkVERIFY_OK(gckOS_DeleteMutex(Command->os, Command->mutexContextSeq));
-#endif
-
     /* Delete the command queue mutex. */
     gcmkVERIFY_OK(gckOS_DeleteMutex(Command->os, Command->mutexQueue));
 
@@ -692,7 +677,7 @@ gckCOMMAND_Destroy(
     /* Free state array. */
     if (Command->hintArrayAllocated)
     {
-        gcmkVERIFY_OK(gcmkOS_SAFE_FREE(Command->os, gcmUINT64_TO_PTR(Command->hintArray)));
+        gcmkVERIFY_OK(gcmkOS_SAFE_FREE(Command->os, Command->hintArray));
         Command->hintArrayAllocated = gcvFALSE;
     }
 #endif
@@ -1144,10 +1129,6 @@ gckCOMMAND_Commit(
 # endif
 #endif
 
-#if VIVANTE_PROFILER_CONTEXT
-    gctBOOL sequenceAcquired = gcvFALSE;
-#endif
-
     gctPOINTER pointer = gcvNULL;
 
     gcmkHEADER_ARG(
@@ -1165,17 +1146,6 @@ gckCOMMAND_Commit(
     }
 
     gcmkONERROR(_FlushMMU(Command));
-
-#if VIVANTE_PROFILER_CONTEXT
-    if((Command->kernel->hardware->gpuProfiler) && (Command->kernel->profileEnable))
-    {
-        /* Acquire the context sequnence mutex. */
-        gcmkONERROR(gckOS_AcquireMutex(
-            Command->os, Command->mutexContextSeq, gcvINFINITE
-            ));
-        sequenceAcquired = gcvTRUE;
-    }
-#endif
 
     /* Acquire the command queue. */
     gcmkONERROR(gckCOMMAND_EnterCommit(Command, gcvFALSE));
@@ -1249,7 +1219,7 @@ gckCOMMAND_Commit(
 
     /* Compute the command buffer entry and the size. */
     commandBufferLogical
-        = (gctUINT8_PTR) gcmUINT64_TO_PTR(commandBufferObject->logical)
+        = (gctUINT8_PTR) commandBufferObject->logical
         +                commandBufferObject->startOffset;
 
     gcmkONERROR(gckOS_GetPhysicalAddress(
@@ -1922,7 +1892,7 @@ gckCOMMAND_Commit(
 
     /* Determine the location of the LINK command in the command buffer. */
     commandBufferLink
-        = (gctUINT8_PTR) gcmUINT64_TO_PTR(commandBufferObject->logical)
+        = (gctUINT8_PTR) commandBufferObject->logical
         +                commandBufferObject->offset;
 
     /* Generate a LINK from the end of the command buffer being scheduled
@@ -2034,23 +2004,6 @@ gckCOMMAND_Commit(
     gcmkONERROR(gckCOMMAND_ExitCommit(Command, gcvFALSE));
     commitEntered = gcvFALSE;
 
-#if VIVANTE_PROFILER_CONTEXT
-    if(sequenceAcquired)
-    {
-        gcmkONERROR(gckCOMMAND_Stall(Command, gcvTRUE));
-        if (Command->currContext)
-        {
-            gcmkONERROR(gckHARDWARE_UpdateContextProfile(
-                hardware,
-                Command->currContext));
-        }
-
-        /* Release the context switching mutex. */
-        gcmkONERROR(gckOS_ReleaseMutex(Command->os, Command->mutexContextSeq));
-        sequenceAcquired = gcvFALSE;
-    }
-#endif
-
     /* Loop while there are records in the queue. */
     while (EventQueue != gcvNULL)
     {
@@ -2081,7 +2034,7 @@ gckCOMMAND_Commit(
             ));
 
         /* Next record in the queue. */
-        nextEventRecord = gcmUINT64_TO_PTR(eventRecord->next);
+        nextEventRecord = eventRecord->next;
 
         if (!needCopy)
         {
@@ -2096,14 +2049,14 @@ gckCOMMAND_Commit(
         EventQueue = nextEventRecord;
     }
 
-    if (Command->kernel->eventObj->queueHead == gcvNULL
-     && Command->kernel->hardware->powerManagement == gcvTRUE
-    )
+#if gcdPOWER_MANAGEMENT
+    if (Command->kernel->eventObj->queueHead == gcvNULL)
     {
         /* Commit done event by which work thread knows all jobs done. */
         gcmkVERIFY_OK(
             gckEVENT_CommitDone(Command->kernel->eventObj, gcvKERNEL_PIXEL));
     }
+#endif
 
     /* Submit events. */
     status = gckEVENT_Submit(Command->kernel->eventObj, gcvTRUE, gcvFALSE);
@@ -2162,14 +2115,6 @@ OnError:
         /* Release the command queue mutex. */
         gcmkVERIFY_OK(gckCOMMAND_ExitCommit(Command, gcvFALSE));
     }
-
-#if VIVANTE_PROFILER_CONTEXT
-    if (sequenceAcquired)
-    {
-        /* Release the context sequence mutex. */
-        gcmkVERIFY_OK(gckOS_ReleaseMutex(Command->os, Command->mutexContextSeq));
-    }
-#endif
 
     /* Unmap the command buffer pointer. */
     if (commandBufferMapped)
